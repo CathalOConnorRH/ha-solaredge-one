@@ -20,12 +20,42 @@ The async API client is a **separate package**,
 [`aiosolaredge-one`](https://github.com/CathalOConnorRH/solaredge-v2), published
 to PyPI and pinned by this integration's `manifest.json`.
 
-## Installation (HACS)
+## Installation
 
-1. In HACS → **Integrations** → ⋮ → **Custom repositories**, add this repo as an
-   *Integration*.
-2. Install **SolarEdge ONE** and restart Home Assistant.
-3. **Settings → Devices & Services → Add Integration → SolarEdge ONE.**
+The API client library is on PyPI, so Home Assistant installs it automatically
+(it's pinned in `manifest.json`) — you only need to get the integration files
+into your config. Pick whichever route suits you.
+
+### Option A — Manual copy (quickest for testing, no HACS needed)
+
+1. Copy the folder [`custom_components/solaredge_one/`](custom_components/solaredge_one)
+   into your Home Assistant config directory (the one with `configuration.yaml`)
+   so you end up with `<config>/custom_components/solaredge_one/`.
+   - **HA OS / Supervised:** use the *Samba*, *SSH & Web Terminal*, or
+     *Studio Code Server* add-on to reach the config folder.
+   - **Container / Core:** copy it into the mounted config volume directly.
+2. **Restart Home Assistant** (Settings → System → Restart) — HA scans
+   `custom_components/` and installs the library from PyPI on startup.
+3. Add the integration:
+
+   [![Open your Home Assistant instance and start setting up this integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=solaredge_one)
+
+   …or go to **Settings → Devices & Services → Add Integration → SolarEdge ONE.**
+
+### Option B — HACS
+
+[![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=CathalOConnorRH&repository=ha-solaredge-one&category=integration)
+
+1. Click the button above (or in HACS → ⋮ → **Custom repositories**, add
+   `https://github.com/CathalOConnorRH/ha-solaredge-one` as an *Integration*).
+2. Install **SolarEdge ONE** and **restart Home Assistant**.
+3. Add the integration with the *config-flow* button above, or via
+   **Settings → Devices & Services → Add Integration → SolarEdge ONE.**
+
+> The HACS button and custom-repository flow require this repo to be **public**.
+> While it's private, use **Option A** (manual copy) — that works regardless of
+> repo visibility. Note the *config-flow* button in Option A only works after the
+> integration files are already installed and HA has restarted.
 
 ## Configuration
 
@@ -74,13 +104,14 @@ exceed your budget it raises a repair issue and slows polling automatically.
 ## Development
 
 Requires **Python 3.13** (the Home Assistant test harness needs it). The client
-library lives in its own repo; install it alongside the test deps:
+library lives in its own repo and is published to PyPI:
 
 ```bash
-# From a checkout of the library repo (sibling directory):
+# The pinned release (matches manifest.json):
+pip install "aiosolaredge-one==0.2.0"
+# ...or an editable checkout of the library repo (sibling directory) when
+# developing both together:
 pip install -e ../solaredge-v2
-# ...or straight from git until it is on PyPI:
-pip install "aiosolaredge-one @ git+https://github.com/CathalOConnorRH/solaredge-v2.git@main"
 
 pip install pytest-homeassistant-custom-component ruff
 ruff check custom_components/solaredge_one tests
