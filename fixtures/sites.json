@@ -1,0 +1,16 @@
+{
+  "sites": {
+    "count": 1,
+    "site": [
+      {
+        "siteId": 3066774,
+        "name": "REDACTED",
+        "peakPower": 5.68,
+        "installationDate": "REDACTED",
+        "location": "REDACTED",
+        "activationStatus": "ACTIVE",
+        "note": ""
+      }
+    ]
+  }
+}

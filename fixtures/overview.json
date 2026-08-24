@@ -1,0 +1,17 @@
+{
+  "siteId": 3066774,
+  "production": {
+    "total": 26290.0,
+    "unit": "WH",
+    "toSelfConsumption": null,
+    "toStorage": null,
+    "toGrid": null
+  },
+  "consumption": {
+    "total": null,
+    "unit": "WH",
+    "fromPv": null,
+    "fromStorage": null,
+    "fromGrid": null
+  }
+}

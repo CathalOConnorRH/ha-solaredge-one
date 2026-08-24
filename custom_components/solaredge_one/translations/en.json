@@ -1,0 +1,95 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to SolarEdge ONE",
+        "description": "Enter your SolarEdge ONE API credentials. The API key is required; the account key is only needed for Fleet accounts.",
+        "data": {
+          "plan_type": "Plan type",
+          "api_key": "API key (X-API-Key)",
+          "account_key": "Account key (X-Account-Key, optional)"
+        },
+        "data_description": {
+          "plan_type": "Choose 'Fleet' for a My Fleet token or 'Site owner' for a single-site token."
+        }
+      },
+      "select_site": {
+        "title": "Select a site",
+        "description": "Choose which site to add. Add the integration again to add more sites.",
+        "data": {
+          "site_id": "Site"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate SolarEdge ONE",
+        "description": "Your credentials are no longer valid. Enter a new API key.",
+        "data": {
+          "api_key": "API key (X-API-Key)",
+          "account_key": "Account key (X-Account-Key, optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid authentication. Check your API key.",
+      "cannot_connect": "Failed to connect to SolarEdge. Try again.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This site is already configured.",
+      "no_sites": "No new sites are available for this account.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Rate limiting & credit budget",
+        "description": "Control how often SolarEdge ONE is polled so you stay within your plan's monthly credits and per-minute call limit.",
+        "data": {
+          "monthly_credit_budget": "Monthly credit budget",
+          "calls_per_minute": "Calls per minute",
+          "budget_safety_factor": "Budget safety factor"
+        },
+        "data_description": {
+          "monthly_credit_budget": "Total API credits your plan allows per month (My Fleet default: 2000).",
+          "calls_per_minute": "Maximum API calls per minute your plan allows (default: 10).",
+          "budget_safety_factor": "Fraction of the monthly budget to actually spend, leaving headroom (default: 0.7)."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "lifetime_production": { "name": "Lifetime production" },
+      "current_power": { "name": "Current power" },
+      "production_to_grid": { "name": "Exported to grid" },
+      "production_self_consumption": { "name": "Production to self-consumption" },
+      "production_to_storage": { "name": "Production to storage" },
+      "consumption_total": { "name": "Consumption" },
+      "consumption_from_grid": { "name": "Imported from grid" },
+      "consumption_from_pv": { "name": "Consumption from solar" },
+      "consumption_from_storage": { "name": "Consumption from storage" },
+      "credits_used": { "name": "Credits used this month" },
+      "credits_remaining": { "name": "Credits remaining this month" },
+      "connected_optimizers": { "name": "Connected optimizers" }
+    },
+    "binary_sensor": {
+      "alerts": { "name": "Alerts" },
+      "inverter_online": { "name": "Connectivity" }
+    }
+  },
+  "selector": {
+    "plan_type": {
+      "options": {
+        "fleet": "Fleet (My Fleet)",
+        "site_owner": "Site owner"
+      }
+    }
+  },
+  "issues": {
+    "over_budget": {
+      "title": "SolarEdge ONE credit budget may be exceeded",
+      "description": "At the current polling rate this site is projected to use about {projected} API credits this month, above your budget of {budget}. Polling has been slowed automatically. Increase the budget or reduce enabled data in the integration options if this is unexpected."
+    }
+  }
+}

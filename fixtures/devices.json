@@ -1,0 +1,18 @@
+[
+  {
+    "type": "INVERTER",
+    "serialNumber": "REDACTED",
+    "manufacturer": "SolarEdge",
+    "partNumber": "SE5000H-RW000BNN4",
+    "createdAt": "2022-08-15T13:20:57+01:00",
+    "firmwareVersion": "4.25.13",
+    "connectedTo": null,
+    "active": true,
+    "nameplate": 0,
+    "name": "REDACTED",
+    "form": null,
+    "communicationType": "ETHERNET",
+    "firmware": "4.25.13.1.100.2061.2.100.1751",
+    "connectedOptimizers": 14
+  }
+]

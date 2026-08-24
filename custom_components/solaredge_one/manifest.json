@@ -1,0 +1,12 @@
+{
+  "domain": "solaredge_one",
+  "name": "SolarEdge ONE",
+  "codeowners": ["@CathalOConnorRH"],
+  "config_flow": true,
+  "documentation": "https://github.com/CathalOConnorRH/ha-solaredge-one",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/CathalOConnorRH/ha-solaredge-one/issues",
+  "requirements": ["aiosolaredge-one==0.2.0"],
+  "version": "0.2.0"
+}

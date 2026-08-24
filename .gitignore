@@ -1,0 +1,21 @@
+# Secrets / local env
+.env
+*.env
+
+# Claude Code local settings — may contain secrets in the permission allow-list
+.claude/settings.local.json
+
+# Unredacted API captures — never commit
+fixtures/_raw/
+
+# Python
+.venv/
+.venv-test/
+*.egg-info/
+dist/
+build/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
