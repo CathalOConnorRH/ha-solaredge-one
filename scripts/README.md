@@ -1,3 +1,19 @@
+# Scripts
+
+## `bootstrap.sh` — dev/test environment
+
+Creates a local `./.venv` (gitignored) with Home Assistant, the test harness,
+ruff, and the `aiosolaredge-one` client. Reproducible from a fresh clone on any
+machine — see the script header for `PYTHON` / `VENV` / `SOLAREDGE_LIB_PATH`
+overrides and [`../CLAUDE.md`](../CLAUDE.md) for the full dev workflow.
+
+```bash
+scripts/bootstrap.sh
+.venv/bin/python -m pytest tests -q
+```
+
+---
+
 # Phase 0 capture spike
 
 Turns the remaining `TBD`s in [`../prd/02-api-and-rate-limiting.md`](../prd/02-api-and-rate-limiting.md)

@@ -32,30 +32,32 @@ the library repo (see its `CLAUDE.md`), then bump the pin here.
 
 ## Dev environment
 
-There is **one shared test venv** for both repos, and it lives in the *library*
-repo:
-
-```
-/Users/catoconn/Workspace/Personal/solaredge-v2/.venv-test
-```
-
-- **Python 3.13** (HA 2026.2.x requires 3.13; a 3.12 venv can't run the harness).
-- Has `homeassistant`, `pytest-homeassistant-custom-component`, `ruff`, and the
-  library installed **editable** (`pip install -e ../solaredge-v2`).
-- No venv lives in this repo. Always invoke tools by absolute path to that venv.
+**Requires Python 3.13** (HA 2026.2.x needs 3.13; a 3.12 venv can't run the
+harness). Bootstrap a local venv from a fresh clone with:
 
 ```bash
-VENV=/Users/catoconn/Workspace/Personal/solaredge-v2/.venv-test/bin
+scripts/bootstrap.sh          # creates ./.venv (gitignored)
+```
 
-# Run the integration tests (from THIS repo's root):
-$VENV/python -m pytest tests -q
+This installs `pytest-homeassistant-custom-component` (pulls in the right HA
+version), `ruff`, and the `aiosolaredge-one` client. If a sibling
+`../solaredge-v2` checkout exists it's installed **editable** (for cross-repo
+work); otherwise the version pinned in `manifest.json` is installed from PyPI.
+Overrides: `PYTHON=`, `VENV=`, `SOLAREDGE_LIB_PATH=` (see the script header).
 
-# Lint (matches CI exactly):
-$VENV/ruff check custom_components/solaredge_one tests
+Then, from this repo's root:
+
+```bash
+.venv/bin/python -m pytest tests -q                          # tests
+.venv/bin/ruff check custom_components/solaredge_one tests   # lint (matches CI)
 ```
 
 `pytest.ini`: `asyncio_mode = auto`, `testpaths = tests`. CI (`.github/workflows/
 ci.yml`) runs ruff + pytest on 3.13 with the pinned library from PyPI.
+
+> On the original maintainer's machine a **shared** venv at
+> `../solaredge-v2/.venv-test` serves both repos; the bootstrap script's local
+> `./.venv` is the portable, machine-agnostic equivalent — use whichever exists.
 `.github/workflows/validate.yml` runs **hassfest + the HACS action** (both must
 stay green; HACS currently has `ignore: brands` until a brands-icon PR lands).
 
