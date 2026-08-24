@@ -1,9 +1,11 @@
 """Sensor platform for SolarEdge ONE.
 
-Energy sensors are cumulative lifetime totals (Wh) exposed as
-``total_increasing`` so they feed the Home Assistant Energy Dashboard directly.
-Current power is a ``measurement`` in W taken from the most recent non-null point
-of the ``/power`` time series.
+Energy sensors are today's running totals (Wh) from ``/overview`` — they climb
+through the day and reset at midnight, so they are exposed as ``total_increasing``
+(which handles the daily reset) and feed the Home Assistant Energy Dashboard
+directly. The ``/overview`` endpoint does not expose lifetime figures. Current
+power is a ``measurement`` in W taken from the most recent non-null point of the
+``/power`` time series.
 
 Consumption / grid / storage breakdown sensors only exist when the site actually
 reports them — a PV-only site (no meter, no battery) returns ``null`` for those
@@ -61,7 +63,7 @@ def _energy(
 
 SENSORS: tuple[SolarEdgeOneSensorDescription, ...] = (
     _energy(
-        "lifetime_production",
+        "production_today",
         lambda data: data.overview.production.total,
         always=True,
     ),

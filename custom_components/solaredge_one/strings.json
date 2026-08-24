@@ -60,15 +60,15 @@
   },
   "entity": {
     "sensor": {
-      "lifetime_production": { "name": "Lifetime production" },
+      "production_today": { "name": "Production today" },
       "current_power": { "name": "Current power" },
-      "production_to_grid": { "name": "Exported to grid" },
-      "production_self_consumption": { "name": "Production to self-consumption" },
-      "production_to_storage": { "name": "Production to storage" },
-      "consumption_total": { "name": "Consumption" },
-      "consumption_from_grid": { "name": "Imported from grid" },
-      "consumption_from_pv": { "name": "Consumption from solar" },
-      "consumption_from_storage": { "name": "Consumption from storage" },
+      "production_to_grid": { "name": "Exported to grid today" },
+      "production_self_consumption": { "name": "Self-consumption today" },
+      "production_to_storage": { "name": "Production to storage today" },
+      "consumption_total": { "name": "Consumption today" },
+      "consumption_from_grid": { "name": "Imported from grid today" },
+      "consumption_from_pv": { "name": "Consumption from solar today" },
+      "consumption_from_storage": { "name": "Consumption from storage today" },
       "credits_used": { "name": "Credits used this month" },
       "credits_remaining": { "name": "Credits remaining this month" },
       "connected_optimizers": { "name": "Connected optimizers" }

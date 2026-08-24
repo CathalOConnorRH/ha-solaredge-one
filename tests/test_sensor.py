@@ -109,7 +109,7 @@ async def test_core_sensors_created_for_pv_only_site(hass: HomeAssistant) -> Non
     """A PV-only site exposes production + power, but no breakdown sensors."""
     await _setup(hass, _pv_only_overview())
 
-    production = hass.states.get("sensor.my_home_lifetime_production")
+    production = hass.states.get("sensor.my_home_production_today")
     assert production is not None
     assert production.state == "26290.0"
     assert production.attributes["state_class"] == "total_increasing"
@@ -123,9 +123,9 @@ async def test_core_sensors_created_for_pv_only_site(hass: HomeAssistant) -> Non
     assert power.attributes["state_class"] == "measurement"
 
     # No meter/battery → breakdown sensors are not created.
-    assert hass.states.get("sensor.my_home_imported_from_grid") is None
-    assert hass.states.get("sensor.my_home_exported_to_grid") is None
-    assert hass.states.get("sensor.my_home_consumption") is None
+    assert hass.states.get("sensor.my_home_imported_from_grid_today") is None
+    assert hass.states.get("sensor.my_home_exported_to_grid_today") is None
+    assert hass.states.get("sensor.my_home_consumption_today") is None
 
 
 async def test_breakdown_sensors_created_when_reported(hass: HomeAssistant) -> None:
@@ -133,13 +133,13 @@ async def test_breakdown_sensors_created_when_reported(hass: HomeAssistant) -> N
     await _setup(hass, _full_overview())
 
     for object_id, expected in (
-        ("sensor.my_home_exported_to_grid", "11290.0"),
-        ("sensor.my_home_imported_from_grid", "2000.0"),
-        ("sensor.my_home_consumption", "15000.0"),
-        ("sensor.my_home_consumption_from_solar", "10000.0"),
-        ("sensor.my_home_consumption_from_storage", "3000.0"),
-        ("sensor.my_home_production_to_storage", "5000.0"),
-        ("sensor.my_home_production_to_self_consumption", "10000.0"),
+        ("sensor.my_home_exported_to_grid_today", "11290.0"),
+        ("sensor.my_home_imported_from_grid_today", "2000.0"),
+        ("sensor.my_home_consumption_today", "15000.0"),
+        ("sensor.my_home_consumption_from_solar_today", "10000.0"),
+        ("sensor.my_home_consumption_from_storage_today", "3000.0"),
+        ("sensor.my_home_production_to_storage_today", "5000.0"),
+        ("sensor.my_home_self_consumption_today", "10000.0"),
     ):
         state = hass.states.get(object_id)
         assert state is not None, object_id
