@@ -19,12 +19,10 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install deps
-        # The client library lives in its own repo. Until it is published to
-        # PyPI, install it straight from git; afterwards replace this with
-        #   pip install "aiosolaredge-one==<version>"
-        # (the version pinned in custom_components/solaredge_one/manifest.json).
+        # The client library lives in its own repo (CathalOConnorRH/solaredge-v2)
+        # and is published to PyPI. Pin matches manifest.json requirements.
         run: |
-          pip install "aiosolaredge-one @ git+https://github.com/CathalOConnorRH/solaredge-v2.git@main"
+          pip install "aiosolaredge-one==0.2.0"
           pip install pytest-homeassistant-custom-component ruff
       - name: Ruff
         run: ruff check custom_components/solaredge_one tests
