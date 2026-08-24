@@ -1,19 +1,20 @@
 """Adaptive, credit-budgeted data update coordinator for SolarEdge ONE.
 
-Phase 3: a single coordinator that paces itself to the monthly credit budget.
-Each cycle it fetches the site overview + power (2 credits), records the spend in
-a persisted ledger, then recomputes its next interval from the credits still
+A single coordinator that paces itself to the monthly credit budget. Each cycle
+it fetches the site overview + power + alerts (3 credits), records the spend in a
+persisted ledger, then recomputes its next interval from the credits still
 available for the rest of the month (see ``aiosolaredge_one.budget``). It slows
 down at night, backs off exponentially on HTTP 429, and raises a repair issue if
 projected month-end spend would exceed the budget.
 
-Tiered coordinators (fast/slow/daily) arrive with the entities in Phase 4; the
-pacing math here is already tier-agnostic.
+The slow lifetime / year-to-date / month-to-date energy totals come from a
+separate ``/energy`` fetch, throttled to ``ENERGY_REFRESH_INTERVAL`` and skipped
+at night, and cached between polls so they add only a couple of credits per hour.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -49,6 +50,7 @@ from .const import (
     DEFAULT_MONTHLY_BUDGET,
     DEFAULT_SAFETY_FACTOR,
     DOMAIN,
+    ENERGY_REFRESH_INTERVAL,
     ISSUE_OVER_BUDGET,
     LOGGER,
     MAX_INTERVAL,
@@ -63,12 +65,26 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True)
+class EnergyTotals:
+    """Slow-moving cumulative energy figures derived from ``/energy``.
+
+    All in Wh. ``None`` means "not (yet) available" — e.g. a plan/site that does
+    not expose ``/energy``, or before the first refresh.
+    """
+
+    lifetime: float | None = None
+    year_to_date: float | None = None
+    month_to_date: float | None = None
+
+
+@dataclass(slots=True)
 class SolarEdgeOneData:
     """Container for the data fetched each update cycle."""
 
     overview: SiteOverview
     power: TimeSeries
     alerts: list[dict[str, Any]]
+    energy: EnergyTotals = field(default_factory=EnergyTotals)
 
 
 def _month_bounds(now: datetime) -> tuple[datetime, datetime]:
@@ -107,6 +123,10 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
         self.ledger = ledger
         self._store = store
         self._backoff_attempt = 0
+        # Slow-moving energy totals: cached between polls, refreshed on a throttle.
+        self._energy: EnergyTotals | None = None
+        self._energy_fetched_at: datetime | None = None
+        self._install_date: str | None = None
 
     # -- config -> pacing plan ----------------------------------------------
     def _build_plan(self) -> BudgetPlan:
@@ -134,10 +154,12 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
 
     # -- fetch --------------------------------------------------------------
     async def _async_update_data(self) -> SolarEdgeOneData:
+        now = datetime.now(UTC)
         try:
             overview = await self.client.get_site_overview(self.site_id)
             power = await self.client.get_power(self.site_id)
             alerts = await self._fetch_alerts()
+            energy = await self._maybe_fetch_energy(now)
         except SolarEdgeAuthError as err:
             raise ConfigEntryAuthFailed("Invalid SolarEdge API credentials") from err
         except SolarEdgeRateLimitError as err:
@@ -150,7 +172,9 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
         self._backoff_attempt = 0
         await save_ledger(self._store, self.ledger)
         self._reschedule()
-        return SolarEdgeOneData(overview=overview, power=power, alerts=alerts)
+        return SolarEdgeOneData(
+            overview=overview, power=power, alerts=alerts, energy=energy
+        )
 
     async def _fetch_alerts(self) -> list[dict[str, Any]]:
         """Fetch alerts, tolerating sites/plans that don't expose the endpoint."""
@@ -158,6 +182,90 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
             return await self.client.get_alerts(self.site_id)
         except SolarEdgeNotFoundError:
             return []
+
+    # -- slow energy totals (lifetime / this-year / this-month) -------------
+    async def _maybe_fetch_energy(self, now: datetime) -> EnergyTotals:
+        """Refresh the slow energy totals on a throttle; else reuse the cache.
+
+        These come from ``/energy`` (separate from the per-cycle overview) and
+        move slowly, so we fetch at most every ``ENERGY_REFRESH_INTERVAL`` and
+        skip at night. Rate-limit / auth errors propagate (so the normal backoff
+        and reauth paths apply); a missing endpoint or transient error just
+        leaves the last known values in place.
+        """
+        due = self._energy is None or (
+            self._energy_fetched_at is not None
+            and (now - self._energy_fetched_at) >= ENERGY_REFRESH_INTERVAL
+            and not self._is_night()
+        )
+        if due:
+            try:
+                await self._refresh_energy(now)
+            except SolarEdgeNotFoundError:
+                # Plan/site does not expose /energy — stop trying, no sensors.
+                self._energy = EnergyTotals()
+                self._energy_fetched_at = now
+            except (SolarEdgeAuthError, SolarEdgeRateLimitError):
+                raise
+            except SolarEdgeError as err:
+                LOGGER.debug(
+                    "Energy totals refresh failed for site %s: %s", self.site_id, err
+                )
+        return self._energy or EnergyTotals()
+
+    async def _refresh_energy(self, now: datetime) -> None:
+        """Fetch lifetime + year-to-date (one YEAR call) and month-to-date."""
+        await self._ensure_install_date()
+        start = self._lifetime_window_start(now)
+
+        # YEAR resolution: one bucket per year. Sum = lifetime; the current
+        # year's bucket = year-to-date.
+        yearly = await self.client.get_energy(
+            self.site_id, date_from=start, date_to=now, resolution="YEAR"
+        )
+        lifetime = yearly.total if yearly.non_null_values else None
+        year_to_date = self._bucket_for_year(yearly, now.year)
+
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        monthly = await self.client.get_energy(
+            self.site_id, date_from=month_start, date_to=now, resolution="MONTH"
+        )
+        month_to_date = monthly.total if monthly.non_null_values else None
+
+        self._energy = EnergyTotals(
+            lifetime=lifetime,
+            year_to_date=year_to_date,
+            month_to_date=month_to_date,
+        )
+        self._energy_fetched_at = now
+
+    async def _ensure_install_date(self) -> None:
+        """Look up the site's installation date once (for the lifetime window)."""
+        if self._install_date is not None:
+            return
+        self._install_date = ""  # mark resolved even if we can't find it
+        for site in await self.client.get_sites():
+            if site.site_id == self.site_id:
+                self._install_date = site.installation_date or ""
+                return
+
+    def _lifetime_window_start(self, now: datetime) -> datetime:
+        try:
+            return datetime.strptime(
+                (self._install_date or "")[:10], "%Y-%m-%d"
+            ).replace(tzinfo=UTC)
+        except ValueError:
+            # Unknown install date: look back far enough to cover any real system.
+            return datetime(now.year - 20, 1, 1, tzinfo=UTC)
+
+    @staticmethod
+    def _bucket_for_year(series: TimeSeries, year: int) -> float | None:
+        """Value of the bucket whose timestamp falls in ``year`` (year-to-date)."""
+        prefix = str(year)
+        for value in series.values:
+            if value.value is not None and value.timestamp.startswith(prefix):
+                return value.value
+        return None
 
     # -- scheduling ---------------------------------------------------------
     def _apply_backoff(self, retry_after: float | None) -> None:

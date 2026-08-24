@@ -60,6 +60,8 @@ async def test_setup_and_unload(hass: HomeAssistant) -> None:
         client.get_power = AsyncMock(return_value=_power())
         client.get_alerts = AsyncMock(return_value=[])
         client.get_devices = AsyncMock(return_value=[])
+        client.get_energy = AsyncMock(return_value=_power())
+        client.get_sites = AsyncMock(return_value=[])
 
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

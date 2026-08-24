@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from aiosolaredge_one import (
@@ -56,6 +57,13 @@ def _power() -> TimeSeries:
     )
 
 
+def _empty_energy() -> TimeSeries:
+    """An empty /energy series → no lifetime/year/month sensors created."""
+    return TimeSeries(
+        period_from=None, period_to=None, unit="WH", resolution="YEAR", values=[]
+    )
+
+
 def _pv_only_overview() -> SiteOverview:
     """A PV-only site: production total present, everything else null."""
     return SiteOverview(
@@ -100,6 +108,8 @@ async def _setup(
         client.get_power = AsyncMock(return_value=_power())
         client.get_alerts = AsyncMock(return_value=[])
         client.get_devices = AsyncMock(return_value=devices or [])
+        client.get_energy = AsyncMock(return_value=_empty_energy())
+        client.get_sites = AsyncMock(return_value=[])
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
     return entry
@@ -160,6 +170,8 @@ async def test_power_unknown_when_series_all_null(hass: HomeAssistant) -> None:
         client.get_power = AsyncMock(return_value=empty_power)
         client.get_alerts = AsyncMock(return_value=[])
         client.get_devices = AsyncMock(return_value=[])
+        client.get_energy = AsyncMock(return_value=_empty_energy())
+        client.get_sites = AsyncMock(return_value=[])
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
@@ -191,3 +203,58 @@ async def test_device_tree_registers_site_and_inverter(hass: HomeAssistant) -> N
     assert inv.model == "SE5000H-RW000BNN4"
     assert inv.sw_version == "4.25.13"
     assert entry.runtime_data.devices == [inverter]
+
+
+async def test_energy_total_sensors_from_energy_endpoint(hass: HomeAssistant) -> None:
+    """Lifetime / this-year / this-month sensors come from /energy.
+
+    The YEAR call yields one bucket per year: their sum is lifetime and the
+    current year's bucket is year-to-date. The MONTH call yields month-to-date.
+    """
+    # Current-year bucket is matched by the coordinator against datetime.now().
+    this_year = datetime.now(UTC).year
+    yearly = TimeSeries(
+        period_from=None,
+        period_to=None,
+        unit="WH",
+        resolution="YEAR",
+        values=[
+            TimeValue(timestamp=f"{this_year - 2}-01-01T00:00:00Z", value=9000000.0),
+            TimeValue(timestamp=f"{this_year - 1}-01-01T00:00:00Z", value=8000000.0),
+            TimeValue(timestamp=f"{this_year}-01-01T00:00:00Z", value=3534371.0),
+        ],
+    )
+    monthly = TimeSeries(
+        period_from=None,
+        period_to=None,
+        unit="WH",
+        resolution="MONTH",
+        values=[TimeValue(timestamp=f"{this_year}-08-01T00:00:00Z", value=527197.0)],
+    )
+
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    with patch("custom_components.solaredge_one.SolarEdgeOneClient") as mock_cls:
+        client = mock_cls.return_value
+        client.get_site_overview = AsyncMock(return_value=_pv_only_overview())
+        client.get_power = AsyncMock(return_value=_power())
+        client.get_alerts = AsyncMock(return_value=[])
+        client.get_devices = AsyncMock(return_value=[])
+        client.get_energy = AsyncMock(side_effect=[yearly, monthly])
+        client.get_sites = AsyncMock(return_value=[])
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    lifetime = hass.states.get("sensor.my_home_lifetime_production")
+    assert lifetime is not None
+    assert lifetime.state == "20534371.0"  # 9M + 8M + 3.534M
+    assert lifetime.attributes["state_class"] == "total_increasing"
+    assert lifetime.attributes["device_class"] == "energy"
+
+    year = hass.states.get("sensor.my_home_production_this_year")
+    assert year is not None
+    assert year.state == "3534371.0"  # 2026 bucket
+
+    month = hass.states.get("sensor.my_home_production_this_month")
+    assert month is not None
+    assert month.state == "527197.0"

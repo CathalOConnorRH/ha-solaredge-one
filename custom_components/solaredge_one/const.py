@@ -38,6 +38,13 @@ MIN_INTERVAL = timedelta(minutes=1)
 MAX_INTERVAL = timedelta(hours=6)
 NIGHT_FACTOR = 3.0
 
+# Lifetime / this-year / this-month energy totals come from /energy, which is
+# separate from the per-cycle overview call. These totals change slowly, so we
+# refresh them at most this often (and skip at night, when nothing is produced),
+# caching the last values between polls. Two extra calls per refresh:
+# one YEAR-resolution call (lifetime + year-to-date) + one MONTH call.
+ENERGY_REFRESH_INTERVAL = timedelta(minutes=60)
+
 # 429 backoff: exponential from 1 min, capped at 1 hour.
 BACKOFF_BASE = timedelta(minutes=1)
 BACKOFF_CAP = timedelta(hours=1)

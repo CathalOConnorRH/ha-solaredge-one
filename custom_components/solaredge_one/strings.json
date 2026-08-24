@@ -61,6 +61,9 @@
   "entity": {
     "sensor": {
       "production_today": { "name": "Production today" },
+      "lifetime_production": { "name": "Lifetime production" },
+      "production_this_year": { "name": "Production this year" },
+      "production_this_month": { "name": "Production this month" },
       "current_power": { "name": "Current power" },
       "production_to_grid": { "name": "Exported to grid today" },
       "production_self_consumption": { "name": "Self-consumption today" },

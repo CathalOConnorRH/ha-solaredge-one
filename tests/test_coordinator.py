@@ -93,6 +93,8 @@ async def test_successful_cycle_paces_and_persists(hass: HomeAssistant) -> None:
     client.get_site_overview = AsyncMock(return_value=_overview())
     client.get_power = AsyncMock(return_value=_power())
     client.get_alerts = AsyncMock(return_value=[])
+    client.get_energy = AsyncMock(return_value=_power())
+    client.get_sites = AsyncMock(return_value=[])
     ledger = CreditLedger(monthly_budget=2000)
 
     coord = _coordinator(hass, entry, client, ledger)
