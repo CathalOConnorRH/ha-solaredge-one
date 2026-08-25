@@ -5,15 +5,24 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from aiosolaredge_one import Site, SolarEdgeAuthError, SolarEdgeConnectionError
+from aiosolaredge_one import (
+    Site,
+    SolarEdgeAuthError,
+    SolarEdgeConnectionError,
+    SolarEdgeError,
+)
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.solaredge_one.const import (
+    CONF_ACCOUNT_KEY,
     CONF_API_KEY,
+    CONF_CALLS_PER_MINUTE,
+    CONF_MONTHLY_BUDGET,
     CONF_PLAN_TYPE,
+    CONF_SAFETY_FACTOR,
     CONF_SITE_ID,
     DOMAIN,
     PLAN_FLEET,
@@ -88,6 +97,7 @@ async def test_user_flow_multi_site(hass: HomeAssistant) -> None:
     [
         (SolarEdgeAuthError("bad"), "invalid_auth"),
         (SolarEdgeConnectionError("down"), "cannot_connect"),
+        (SolarEdgeError("boom"), "unknown"),
     ],
 )
 async def test_user_flow_errors(
@@ -127,6 +137,145 @@ async def test_user_flow_no_new_sites(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "no_sites"
+
+
+async def test_user_flow_with_account_key(hass: HomeAssistant) -> None:
+    """A Fleet token with an account key is stored alongside the api key."""
+    patcher, _ = _patch_client(sites=[_site(3066774, "My Home")])
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_PLAN_TYPE: PLAN_FLEET,
+                CONF_API_KEY: "test-key",
+                CONF_ACCOUNT_KEY: "acct-key",
+            },
+        )
+    finally:
+        patcher.stop()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_API_KEY] == "test-key"
+    assert result["data"][CONF_ACCOUNT_KEY] == "acct-key"
+
+
+async def test_reauth_flow_updates_credentials(hass: HomeAssistant) -> None:
+    """Reauth validates the new key, updates the entry, and aborts as successful."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="3066774",
+        data={
+            CONF_PLAN_TYPE: PLAN_SITE_OWNER,
+            CONF_API_KEY: "old-key",
+            CONF_SITE_ID: 3066774,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    patcher, _ = _patch_client(sites=[_site(3066774, "My Home")])
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+            data=entry.data,
+        )
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "reauth_confirm"
+
+        # Avoid a real entry reload/setup — this test only exercises the flow.
+        with patch(
+            "custom_components.solaredge_one.async_setup_entry", return_value=True
+        ):
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], {CONF_API_KEY: "new-key"}
+            )
+            await hass.async_block_till_done()
+    finally:
+        patcher.stop()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_API_KEY] == "new-key"
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "expected_error"),
+    [
+        (SolarEdgeAuthError("bad"), "invalid_auth"),
+        (SolarEdgeConnectionError("down"), "cannot_connect"),
+        (SolarEdgeError("boom"), "unknown"),
+    ],
+)
+async def test_reauth_flow_rejects_bad_credentials(
+    hass: HomeAssistant, side_effect: Exception, expected_error: str
+) -> None:
+    """A still-failing validation during reauth re-shows the form with an error."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="3066774",
+        data={
+            CONF_PLAN_TYPE: PLAN_SITE_OWNER,
+            CONF_API_KEY: "old-key",
+            CONF_SITE_ID: 3066774,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    patcher, _ = _patch_client(side_effect=side_effect)
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_REAUTH,
+                "entry_id": entry.entry_id,
+            },
+            data=entry.data,
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_API_KEY: "still-bad"}
+        )
+    finally:
+        patcher.stop()
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": expected_error}
+
+
+async def test_options_flow_persists_tuning(hass: HomeAssistant) -> None:
+    """The options flow shows the form and stores the tuning values."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="3066774",
+        data={
+            CONF_PLAN_TYPE: PLAN_SITE_OWNER,
+            CONF_API_KEY: "test-key",
+            CONF_SITE_ID: 3066774,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_MONTHLY_BUDGET: 3000,
+            CONF_CALLS_PER_MINUTE: 5,
+            CONF_SAFETY_FACTOR: 0.8,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_MONTHLY_BUDGET] == 3000
+    assert entry.options[CONF_CALLS_PER_MINUTE] == 5
+    assert entry.options[CONF_SAFETY_FACTOR] == 0.8
 
 
 async def test_duplicate_site_aborts(hass: HomeAssistant) -> None:

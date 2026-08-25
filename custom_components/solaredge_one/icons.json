@@ -1,0 +1,28 @@
+{
+  "entity": {
+    "sensor": {
+      "production_today": { "default": "mdi:solar-power" },
+      "lifetime_production": { "default": "mdi:solar-power-variant" },
+      "production_this_year": { "default": "mdi:solar-power-variant" },
+      "production_this_month": { "default": "mdi:solar-power-variant" },
+      "current_power": { "default": "mdi:flash" },
+      "production_to_grid": { "default": "mdi:transmission-tower-export" },
+      "production_self_consumption": { "default": "mdi:home-lightning-bolt" },
+      "production_to_storage": { "default": "mdi:battery-charging" },
+      "consumption_total": { "default": "mdi:home-lightning-bolt" },
+      "consumption_from_grid": { "default": "mdi:transmission-tower-import" },
+      "consumption_from_pv": { "default": "mdi:solar-power" },
+      "consumption_from_storage": { "default": "mdi:battery-arrow-down" },
+      "credits_used": { "default": "mdi:counter" },
+      "credits_remaining": { "default": "mdi:gauge" },
+      "connected_optimizers": { "default": "mdi:chip" }
+    },
+    "binary_sensor": {
+      "alerts": {
+        "default": "mdi:alert-circle-check",
+        "state": { "on": "mdi:alert", "off": "mdi:check-circle-outline" }
+      },
+      "inverter_online": { "default": "mdi:lan-connect" }
+    }
+  }
+}

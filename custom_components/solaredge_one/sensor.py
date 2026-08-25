@@ -34,6 +34,9 @@ from . import SolarEdgeOneConfigEntry
 from .coordinator import SolarEdgeOneCoordinator, SolarEdgeOneData
 from .entity import SolarEdgeOneDeviceEntity, SolarEdgeOneEntity
 
+# Read-only integration: all entities read from one coordinator, no writes.
+PARALLEL_UPDATES = 0
+
 
 @dataclass(frozen=True, kw_only=True)
 class SolarEdgeOneSensorDescription(SensorEntityDescription):

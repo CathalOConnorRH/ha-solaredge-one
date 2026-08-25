@@ -23,8 +23,10 @@ jobs:
         # and is published to PyPI. Pin matches manifest.json requirements.
         run: |
           pip install "aiosolaredge-one==0.2.0"
-          pip install pytest-homeassistant-custom-component ruff
+          pip install pytest-homeassistant-custom-component ruff mypy
       - name: Ruff
         run: ruff check custom_components/solaredge_one tests
+      - name: Mypy (strict)
+        run: mypy --strict custom_components/solaredge_one
       - name: Pytest
         run: pytest tests -q

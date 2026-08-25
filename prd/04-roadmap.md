@@ -95,16 +95,29 @@ concentrated in Phase 0; later phases run on fixtures.
       blocked on the device-telemetry v2 paths (only inventory is confirmed).
 - **DoD:** ✅ device tree correct; alerts reflect fixtures; diagnostics redacted.
 
-## Phase 6 — Polish & release  🟡 IN PROGRESS
-- [x] Repo `README.md` (install, config, options, entities, dev); `codeowners`
-      set in the manifest.
+## Phase 6 — Polish & release  ✅ DONE (external `brands` + full i18n deferred)
+- [x] Repo `README.md` — install, config, options, entities, **plus the Gold
+      `docs-*` sections**: supported devices, data-update model, use cases,
+      example automations, known limitations, troubleshooting, removal.
+      `codeowners` set in the manifest.
 - [x] Options flow for the core tunables (budget / calls-per-minute / safety).
-- [ ] Full translations beyond `en`; quality-scale audit (Silver→Gold).
+- [x] Quality-scale audit — see [06-quality-scale.md](06-quality-scale.md).
+      Bronze/Silver effectively met (Bronze pending only external `brands`
+      assets); Gold largely met; Platinum met (`async` lib, injected websession,
+      `mypy --strict` in CI). `PARALLEL_UPDATES = 0`, `icons.json`, and mypy in
+      CI added here.
+- [x] `config_flow.py` at 100% coverage; overall ~97% (above the 95% target).
 - [ ] HACS release tag — **blocked**: repo is private; needs to be made public.
-- **DoD:** HACS-installable release tag; docs complete; test coverage target met.
+- [ ] `brands` assets (PR to home-assistant/brands); full translations beyond
+      `en`; Gold `dynamic-devices`/`stale-devices`/`reconfiguration-flow`/
+      `exception-translations` (tracked in 06-quality-scale.md).
+- **DoD:** ✅ docs complete; coverage target met; quality-scale audited. HACS
+  tag still awaits the repo going public.
 
 ## Phase 7 — HA Core submission (stretch)
 - Library already separate; align with core requirements; open PR.
+- Convert [06-quality-scale.md](06-quality-scale.md) into `quality_scale.yaml`
+  and set the manifest `quality_scale` tier once `brands` has landed.
 
 ## Cross-cutting engineering standards
 - Python 3.13+, async everywhere, `ruff` + `mypy --strict`.

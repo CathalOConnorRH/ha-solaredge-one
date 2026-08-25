@@ -23,6 +23,9 @@ from . import SolarEdgeOneConfigEntry
 from .coordinator import SolarEdgeOneCoordinator
 from .entity import SolarEdgeOneDeviceEntity, SolarEdgeOneEntity
 
+# Read-only integration: all entities read from one coordinator, no writes.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,

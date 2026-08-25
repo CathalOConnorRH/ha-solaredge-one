@@ -10,9 +10,12 @@ from aiosolaredge_one import (
     ConsumptionOverview,
     CreditLedger,
     ProductionOverview,
+    Site,
     SiteOverview,
+    SolarEdgeNotFoundError,
     SolarEdgeRateLimitError,
     TimeSeries,
+    TimeValue,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
@@ -105,6 +108,75 @@ async def test_successful_cycle_paces_and_persists(hass: HomeAssistant) -> None:
     assert MIN_INTERVAL <= coord.update_interval <= MAX_INTERVAL
     # Ledger was written to storage.
     assert await ledger_store(hass, entry.entry_id).async_load() is not None
+
+
+async def test_energy_totals_use_install_date_and_populate(
+    hass: HomeAssistant,
+) -> None:
+    """A clean cycle looks up the install date and fills the energy totals."""
+    from datetime import datetime
+
+    entry = _entry()
+    entry.add_to_hass(hass)
+    this_year = datetime.now(UTC).year
+    yearly = TimeSeries(
+        period_from=None,
+        period_to=None,
+        unit="WH",
+        resolution="YEAR",
+        values=[
+            TimeValue(timestamp=f"{this_year - 1}-01-01T00:00:00Z", value=8000000.0),
+            TimeValue(timestamp=f"{this_year}-01-01T00:00:00Z", value=3500000.0),
+        ],
+    )
+    monthly = TimeSeries(
+        period_from=None,
+        period_to=None,
+        unit="WH",
+        resolution="MONTH",
+        values=[TimeValue(timestamp=f"{this_year}-08-01T00:00:00Z", value=500000.0)],
+    )
+    client = Mock()
+    client.get_site_overview = AsyncMock(return_value=_overview())
+    client.get_power = AsyncMock(return_value=_power())
+    client.get_alerts = AsyncMock(return_value=[])
+    client.get_energy = AsyncMock(side_effect=[yearly, monthly])
+    client.get_sites = AsyncMock(
+        return_value=[
+            Site(site_id=3066774, name="My Home", installation_date="2019-06-01")
+        ]
+    )
+
+    coord = _coordinator(hass, entry, client, CreditLedger(monthly_budget=2000))
+    await coord.async_refresh()
+
+    assert coord.last_update_success is True
+    assert coord.data.energy.lifetime == 11500000.0  # 8M + 3.5M
+    assert coord.data.energy.year_to_date == 3500000.0
+    assert coord.data.energy.month_to_date == 500000.0
+    # The install date bounded the YEAR window (from=2019-06-01).
+    year_call = client.get_energy.await_args_list[0]
+    assert year_call.kwargs["date_from"].year == 2019
+
+
+async def test_energy_not_found_is_tolerated(hass: HomeAssistant) -> None:
+    """A site/plan without /energy leaves totals empty but the cycle succeeds."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+    client = Mock()
+    client.get_site_overview = AsyncMock(return_value=_overview())
+    client.get_power = AsyncMock(return_value=_power())
+    client.get_alerts = AsyncMock(return_value=[])
+    client.get_energy = AsyncMock(side_effect=SolarEdgeNotFoundError("no energy"))
+    client.get_sites = AsyncMock(return_value=[])
+
+    coord = _coordinator(hass, entry, client, CreditLedger(monthly_budget=2000))
+    await coord.async_refresh()
+
+    assert coord.last_update_success is True
+    assert coord.data.energy.lifetime is None
+    assert coord.data.energy.year_to_date is None
+    assert coord.data.energy.month_to_date is None
 
 
 async def test_rate_limit_backs_off_without_crashing(hass: HomeAssistant) -> None:
