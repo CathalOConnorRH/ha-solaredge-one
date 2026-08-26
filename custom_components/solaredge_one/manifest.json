@@ -7,6 +7,6 @@
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/CathalOConnorRH/ha-solaredge-one/issues",
-  "requirements": ["aiosolaredge-one==0.2.0"],
-  "version": "0.2.3"
+  "requirements": ["aiosolaredge-one==0.3.0"],
+  "version": "0.2.4"
 }
