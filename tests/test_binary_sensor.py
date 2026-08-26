@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, patch
 from aiosolaredge_one import (
     ConsumptionOverview,
     Device,
+    EnvironmentalBenefits,
     ProductionOverview,
+    Site,
     SiteOverview,
     TimeSeries,
 )
@@ -67,7 +69,14 @@ async def _setup(
         client.get_power = AsyncMock(return_value=_power())
         client.get_alerts = AsyncMock(return_value=alerts or [])
         client.get_devices = AsyncMock(return_value=devices or [])
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=SITE_ID, name="My Home")
+        )
+        client.get_lifetime_energy = AsyncMock(return_value=_power())
         client.get_energy = AsyncMock(return_value=_power())
+        client.get_environmental_benefits = AsyncMock(
+            return_value=EnvironmentalBenefits()
+        )
         client.get_sites = AsyncMock(return_value=[])
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

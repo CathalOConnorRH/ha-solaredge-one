@@ -116,11 +116,19 @@ HACS installs from GitHub releases; hassfest/HACS validation run on push/PR.
 
 ## Current status & known blockers
 
-- Live through **v0.2.2**: production today + breakdowns + current power + alerts
+- Live through **v0.3.0**: production today + breakdowns + current power + alerts
   + credit diagnostics + per-inverter connectivity/optimizers + lifetime/this-year/
-  this-month totals. Config flow confirmed working against real HA.
-- **Blocked (need real v2 API paths):** battery/storage telemetry, per-inverter
-  *live* telemetry, per-optimizer/panel entities — these paths 404'd in probing.
+  this-month totals. Config flow confirmed working against real HA. v0.3.0 wired
+  the 0.3.0 library endpoints: environmental benefits (CO2 saved + EV miles),
+  site-details metadata (seeds install date + site hw_version), lifetime energy
+  via `resolution=TOTAL` (YEAR fallback), and battery storage telemetry.
+- **Lifetime-via-TOTAL and storage telemetry are unverified against a live
+  site:** both are guarded — TOTAL falls back to a YEAR-sum, and storage is
+  battery-gated with defensive `parse_storage_state` that no-ops on an
+  unrecognised payload. Diagnostics dump the raw storage payload so the real v2
+  shape can be captured and the parser refined.
+- **Still blocked (need real v2 API paths):** per-inverter *live* telemetry,
+  per-optimizer/panel entities — these paths 404'd in probing.
 - **Open tasks:** brands-icon PR to `home-assistant/brands` (needs 256×256 &
   512×512 PNGs, then drop `ignore: brands` in validate.yml); `hacs/default`
   listing PR; full non-en translations; quality-scale audit.

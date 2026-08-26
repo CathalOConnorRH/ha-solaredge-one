@@ -60,6 +60,15 @@ async def async_get_config_entry_diagnostics(
             "power_latest": data.power.latest_value,
             "alert_count": len(data.alerts),
             "alerts": [async_redact_data(alert, TO_REDACT) for alert in data.alerts],
+            "energy": {
+                "lifetime": data.energy.lifetime,
+                "year_to_date": data.energy.year_to_date,
+                "month_to_date": data.energy.month_to_date,
+            },
+            "environmental": async_redact_data(data.environmental.raw, TO_REDACT),
+            # Raw storage payload captured verbatim: the live v2 telemetry shape
+            # is still unconfirmed, so this is the reference for refining parsing.
+            "storage": async_redact_data(data.storage.raw, TO_REDACT),
         }
 
     return diagnostics

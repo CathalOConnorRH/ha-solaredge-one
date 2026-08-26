@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, patch
 from aiosolaredge_one import (
     ConsumptionOverview,
     Device,
+    EnvironmentalBenefits,
     ProductionOverview,
+    Site,
     SiteOverview,
     TimeSeries,
     TimeValue,
@@ -76,7 +78,14 @@ async def test_diagnostics_redacts_secrets(hass: HomeAssistant) -> None:
         client.get_power = AsyncMock(return_value=_power())
         client.get_alerts = AsyncMock(return_value=[{"id": 1, "message": "x"}])
         client.get_devices = AsyncMock(return_value=[device])
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=SITE_ID, name="My Home")
+        )
+        client.get_lifetime_energy = AsyncMock(return_value=_power())
         client.get_energy = AsyncMock(return_value=_power())
+        client.get_environmental_benefits = AsyncMock(
+            return_value=EnvironmentalBenefits()
+        )
         client.get_sites = AsyncMock(return_value=[])
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

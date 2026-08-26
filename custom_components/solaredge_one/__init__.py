@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from aiosolaredge_one import CreditLedger, Device, SolarEdgeError, SolarEdgeOneClient
+from aiosolaredge_one import (
+    CreditLedger,
+    Device,
+    Site,
+    SolarEdgeError,
+    SolarEdgeOneClient,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -32,6 +38,7 @@ class SolarEdgeOneRuntimeData:
     coordinator: SolarEdgeOneCoordinator
     ledger: CreditLedger
     devices: list[Device] = field(default_factory=list)
+    site: Site | None = None
 
 
 type SolarEdgeOneConfigEntry = ConfigEntry[SolarEdgeOneRuntimeData]
@@ -60,21 +67,43 @@ async def async_setup_entry(
         ledger=ledger,
     )
     site_id = int(entry.data[CONF_SITE_ID])
-    coordinator = SolarEdgeOneCoordinator(hass, entry, client, site_id, ledger, store)
-    await coordinator.async_config_entry_first_refresh()
 
-    # Inventory rarely changes: fetch once at setup to build the device tree.
-    # A failure here must not block setup — the site-level sensors still work.
+    # One-off metadata fetched before the coordinator so it can seed the install
+    # date (for the lifetime-energy window) and know whether a battery exists
+    # (to gate storage telemetry). Failures here must not block setup — the
+    # site-level sensors still work without them.
+    site: Site | None = None
+    try:
+        site = await client.get_site_details(site_id)
+    except SolarEdgeError as err:
+        LOGGER.debug("Could not fetch site details for site %s: %s", site_id, err)
+
     devices: list[Device] = []
     try:
         devices = await client.get_devices(site_id)
     except SolarEdgeError as err:
         LOGGER.debug("Could not fetch device inventory for site %s: %s", site_id, err)
 
-    entry.runtime_data = SolarEdgeOneRuntimeData(
-        client=client, coordinator=coordinator, ledger=ledger, devices=devices
+    coordinator = SolarEdgeOneCoordinator(
+        hass,
+        entry,
+        client,
+        site_id,
+        ledger,
+        store,
+        install_date=site.installation_date if site else None,
+        has_battery=_has_battery(devices),
     )
-    _register_devices(hass, entry, site_id, entry.title, devices)
+    await coordinator.async_config_entry_first_refresh()
+
+    entry.runtime_data = SolarEdgeOneRuntimeData(
+        client=client,
+        coordinator=coordinator,
+        ledger=ledger,
+        devices=devices,
+        site=site,
+    )
+    _register_devices(hass, entry, site_id, entry.title, site, devices)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -95,11 +124,21 @@ async def _async_update_listener(
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _has_battery(devices: list[Device]) -> bool:
+    """True when the inventory contains a battery/storage device."""
+    return any(
+        (device.type or "").upper() in ("BATTERY", "STORAGE")
+        or "BATTER" in (device.type or "").upper()
+        for device in devices
+    )
+
+
 def _register_devices(
     hass: HomeAssistant,
     entry: SolarEdgeOneConfigEntry,
     site_id: int,
     site_name: str,
+    site: Site | None,
     devices: list[Device],
 ) -> None:
     """Create the Site device and its child devices (inverters, meters...).
@@ -108,12 +147,18 @@ def _register_devices(
     before per-device entities exist (those arrive in a later phase).
     """
     registry = dr.async_get(hass)
+    # Peak (installed) DC capacity, if the site details reported it, shown on the
+    # site device as its hardware version (kWp).
+    hw_version = (
+        f"{site.peak_power:g} kWp" if site and site.peak_power is not None else None
+    )
     registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, str(site_id))},
         manufacturer="SolarEdge",
         model="SolarEdge ONE Site",
         name=site_name,
+        hw_version=hw_version,
         configuration_url="https://monitoring.solaredge.com",
     )
     seen: set[str] = set()

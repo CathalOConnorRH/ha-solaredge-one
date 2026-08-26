@@ -72,6 +72,12 @@
       "consumption_from_grid": { "name": "Imported from grid today" },
       "consumption_from_pv": { "name": "Consumption from solar today" },
       "consumption_from_storage": { "name": "Consumption from storage today" },
+      "co2_saved": { "name": "CO2 emissions saved" },
+      "ev_miles": { "name": "Equivalent EV miles" },
+      "battery_state_of_charge": { "name": "Battery charge" },
+      "battery_charge_power": { "name": "Battery charge power" },
+      "battery_discharge_power": { "name": "Battery discharge power" },
+      "battery_remaining_energy": { "name": "Battery remaining energy" },
       "credits_used": { "name": "Credits used this month" },
       "credits_remaining": { "name": "Credits remaining this month" },
       "connected_optimizers": { "name": "Connected optimizers" }

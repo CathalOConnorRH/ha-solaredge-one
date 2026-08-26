@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from aiosolaredge_one import (
     BudgetPlan,
     CreditLedger,
+    EnvironmentalBenefits,
     SiteOverview,
     SolarEdgeAuthError,
     SolarEdgeError,
@@ -78,6 +79,23 @@ class EnergyTotals:
 
 
 @dataclass(slots=True)
+class StorageState:
+    """Battery telemetry snapshot derived from ``/storage/telemetry``.
+
+    All fields default to ``None`` — the live v2 storage payload shape has not
+    been captured yet, so parsing is best-effort (see ``parse_storage_state``)
+    and a PV-only or unrecognised payload simply yields an empty snapshot. Powers
+    are in W, energies in Wh, state of charge in %.
+    """
+
+    state_of_charge: float | None = None
+    charge_power: float | None = None
+    discharge_power: float | None = None
+    remaining_energy: float | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class SolarEdgeOneData:
     """Container for the data fetched each update cycle."""
 
@@ -85,6 +103,8 @@ class SolarEdgeOneData:
     power: TimeSeries
     alerts: list[dict[str, Any]]
     energy: EnergyTotals = field(default_factory=EnergyTotals)
+    environmental: EnvironmentalBenefits = field(default_factory=EnvironmentalBenefits)
+    storage: StorageState = field(default_factory=StorageState)
 
 
 def _month_bounds(now: datetime) -> tuple[datetime, datetime]:
@@ -95,6 +115,76 @@ def _month_bounds(now: datetime) -> tuple[datetime, datetime]:
     else:
         nxt = start.replace(month=start.month + 1)
     return start, nxt
+
+
+def _as_float(value: Any) -> float | None:
+    """Coerce a scalar (or a {timestamp,value} point) to float, else ``None``."""
+    if isinstance(value, dict):
+        value = value.get("value")
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _deep_find_latest(obj: Any, keys: tuple[str, ...]) -> float | None:
+    """Best-effort search of a nested payload for the latest value of a metric.
+
+    The live v2 storage telemetry shape is uncaptured, so rather than assume a
+    layout we walk the whole structure looking for any of ``keys`` (case-
+    insensitive). Both shapes are handled: a metric held directly (as a scalar or
+    a ``{timestamp, value}`` series), and a metric that is a key inside each point
+    of a telemetry list. Payloads are assumed chronological, so the last match
+    encountered wins. Returns ``None`` when nothing matches — an unrecognised
+    payload then yields no sensors.
+    """
+    wanted = {k.lower() for k in keys}
+    latest: float | None = None
+
+    def _consider(value: Any) -> None:
+        nonlocal latest
+        candidates = value if isinstance(value, list) else [value]
+        for candidate in candidates:
+            found = _as_float(candidate)
+            if found is not None:
+                latest = found
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key.lower() in wanted:
+                    _consider(value)
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(obj)
+    return latest
+
+
+def parse_storage_state(raw: dict[str, Any]) -> StorageState:
+    """Best-effort extraction of the battery metrics from raw storage telemetry.
+
+    Key aliases cover both the v1 field names and the likely v2 renames; the true
+    v2 shape is captured in diagnostics for later refinement.
+    """
+    return StorageState(
+        state_of_charge=_deep_find_latest(
+            raw, ("stateOfEnergy", "batteryPercentageState", "stateOfCharge", "soc")
+        ),
+        charge_power=_deep_find_latest(raw, ("chargePower", "charging", "powerCharge")),
+        discharge_power=_deep_find_latest(
+            raw, ("dischargePower", "discharging", "powerDischarge")
+        ),
+        remaining_energy=_deep_find_latest(
+            raw, ("remainingEnergy", "availableEnergy", "batteryRemainingEnergy")
+        ),
+        raw=raw,
+    )
 
 
 class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
@@ -110,6 +200,9 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
         site_id: int,
         ledger: CreditLedger,
         store: Store[dict[str, object]],
+        *,
+        install_date: str | None = None,
+        has_battery: bool = False,
     ) -> None:
         super().__init__(
             hass,
@@ -123,10 +216,19 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
         self.ledger = ledger
         self._store = store
         self._backoff_attempt = 0
+        self._has_battery = has_battery
         # Slow-moving energy totals: cached between polls, refreshed on a throttle.
         self._energy: EnergyTotals | None = None
         self._energy_fetched_at: datetime | None = None
-        self._install_date: str | None = None
+        # ``None`` = not yet resolved (triggers a one-off /sites lookup); ``""`` =
+        # resolved-but-unknown. Seeded from /sites/{id} details at setup.
+        self._install_date: str | None = install_date
+        # TOTAL-resolution lifetime is unverified against the live site; once it
+        # returns nothing we stop relying on it and use the YEAR fallback.
+        self._total_unsupported = False
+        # Slow-moving environmental benefits: same throttle as the energy totals.
+        self._environmental: EnvironmentalBenefits | None = None
+        self._environmental_fetched_at: datetime | None = None
 
     # -- config -> pacing plan ----------------------------------------------
     def _build_plan(self) -> BudgetPlan:
@@ -136,10 +238,13 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
         def _opt(key: str, default: Any) -> Any:
             return entry.options.get(key, entry.data.get(key, default))
 
+        # A battery adds a storage-telemetry call to every cycle; count it so the
+        # pacing projection stays honest for battery sites.
+        credits_per_cycle = CREDITS_PER_CYCLE + (1 if self._has_battery else 0)
         return BudgetPlan(
             monthly_budget=int(_opt(CONF_MONTHLY_BUDGET, DEFAULT_MONTHLY_BUDGET)),
             calls_per_minute=int(_opt(CONF_CALLS_PER_MINUTE, DEFAULT_CALLS_PER_MINUTE)),
-            credits_per_cycle=CREDITS_PER_CYCLE,
+            credits_per_cycle=credits_per_cycle,
             safety_factor=float(_opt(CONF_SAFETY_FACTOR, DEFAULT_SAFETY_FACTOR)),
             night_factor=NIGHT_FACTOR,
             min_interval=MIN_INTERVAL.total_seconds(),
@@ -160,6 +265,8 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
             power = await self.client.get_power(self.site_id)
             alerts = await self._fetch_alerts()
             energy = await self._maybe_fetch_energy(now)
+            environmental = await self._maybe_fetch_environmental(now)
+            storage = await self._fetch_storage()
         except SolarEdgeAuthError as err:
             raise ConfigEntryAuthFailed("Invalid SolarEdge API credentials") from err
         except SolarEdgeRateLimitError as err:
@@ -173,7 +280,12 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
         await save_ledger(self._store, self.ledger)
         self._reschedule()
         return SolarEdgeOneData(
-            overview=overview, power=power, alerts=alerts, energy=energy
+            overview=overview,
+            power=power,
+            alerts=alerts,
+            energy=energy,
+            environmental=environmental,
+            storage=storage,
         )
 
     async def _fetch_alerts(self) -> list[dict[str, Any]]:
@@ -214,23 +326,29 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
         return self._energy or EnergyTotals()
 
     async def _refresh_energy(self, now: datetime) -> None:
-        """Fetch lifetime + year-to-date (one YEAR call) and month-to-date."""
+        """Refresh lifetime + year-to-date + month-to-date from ``/energy``.
+
+        Two calls in the common case: a ``resolution=TOTAL`` call (the v2 way to
+        get a single lifetime bucket) plus a MONTH call spanning the current year
+        whose sum is year-to-date and whose current-month bucket is
+        month-to-date. TOTAL is unverified against the live site, so if it yields
+        nothing we fall back to summing a YEAR call and stop calling TOTAL.
+        """
         await self._ensure_install_date()
         start = self._lifetime_window_start(now)
 
-        # YEAR resolution: one bucket per year. Sum = lifetime; the current
-        # year's bucket = year-to-date.
-        yearly = await self.client.get_energy(
-            self.site_id, date_from=start, date_to=now, resolution="YEAR"
-        )
-        lifetime = yearly.total if yearly.non_null_values else None
-        year_to_date = self._bucket_for_year(yearly, now.year)
+        lifetime = await self._fetch_lifetime(start, now)
 
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        monthly = await self.client.get_energy(
-            self.site_id, date_from=month_start, date_to=now, resolution="MONTH"
+        # MONTH resolution across this year: sum = year-to-date, the current
+        # month's bucket = month-to-date.
+        year_start = now.replace(
+            month=1, day=1, hour=0, minute=0, second=0, microsecond=0
         )
-        month_to_date = monthly.total if monthly.non_null_values else None
+        monthly = await self.client.get_energy(
+            self.site_id, date_from=year_start, date_to=now, resolution="MONTH"
+        )
+        year_to_date = monthly.total if monthly.non_null_values else None
+        month_to_date = self._bucket_prefix(monthly, now.strftime("%Y-%m"))
 
         self._energy = EnergyTotals(
             lifetime=lifetime,
@@ -238,6 +356,26 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
             month_to_date=month_to_date,
         )
         self._energy_fetched_at = now
+
+    async def _fetch_lifetime(self, start: datetime, now: datetime) -> float | None:
+        """Lifetime Wh via ``resolution=TOTAL``, falling back to a YEAR sum."""
+        if not self._total_unsupported:
+            try:
+                total = await self.client.get_lifetime_energy(
+                    self.site_id, date_from=start, date_to=now
+                )
+            except SolarEdgeNotFoundError:
+                self._total_unsupported = True
+            else:
+                if total.non_null_values:
+                    return total.total
+                # Empty payload: TOTAL isn't giving us anything useful here.
+                self._total_unsupported = True
+
+        yearly = await self.client.get_energy(
+            self.site_id, date_from=start, date_to=now, resolution="YEAR"
+        )
+        return yearly.total if yearly.non_null_values else None
 
     async def _ensure_install_date(self) -> None:
         """Look up the site's installation date once (for the lifetime window)."""
@@ -259,13 +397,64 @@ class SolarEdgeOneCoordinator(DataUpdateCoordinator[SolarEdgeOneData]):
             return datetime(now.year - 20, 1, 1, tzinfo=UTC)
 
     @staticmethod
-    def _bucket_for_year(series: TimeSeries, year: int) -> float | None:
-        """Value of the bucket whose timestamp falls in ``year`` (year-to-date)."""
-        prefix = str(year)
+    def _bucket_prefix(series: TimeSeries, prefix: str) -> float | None:
+        """Value of the first non-null bucket whose timestamp starts with ``prefix``."""
         for value in series.values:
             if value.value is not None and value.timestamp.startswith(prefix):
                 return value.value
         return None
+
+    # -- environmental benefits (CO2 saved / EV miles) ----------------------
+    async def _maybe_fetch_environmental(
+        self, now: datetime
+    ) -> EnvironmentalBenefits:
+        """Refresh environmental benefits on the energy throttle; else reuse cache."""
+        due = self._environmental is None or (
+            self._environmental_fetched_at is not None
+            and (now - self._environmental_fetched_at) >= ENERGY_REFRESH_INTERVAL
+            and not self._is_night()
+        )
+        if due:
+            try:
+                self._environmental = await self.client.get_environmental_benefits(
+                    self.site_id, unit="METRIC"
+                )
+                self._environmental_fetched_at = now
+            except SolarEdgeNotFoundError:
+                self._environmental = EnvironmentalBenefits()
+                self._environmental_fetched_at = now
+            except (SolarEdgeAuthError, SolarEdgeRateLimitError):
+                raise
+            except SolarEdgeError as err:
+                LOGGER.debug(
+                    "Environmental benefits refresh failed for site %s: %s",
+                    self.site_id,
+                    err,
+                )
+        return self._environmental or EnvironmentalBenefits()
+
+    # -- battery telemetry --------------------------------------------------
+    async def _fetch_storage(self) -> StorageState:
+        """Fetch battery telemetry when the site has a battery; else empty.
+
+        Fetched every cycle (it changes minute-to-minute, unlike the energy
+        totals). Gated on battery presence so PV-only sites never spend a credit
+        here, and tolerant of a missing endpoint / unrecognised payload.
+        """
+        if not self._has_battery:
+            return StorageState()
+        try:
+            raw = await self.client.get_storage_telemetry(self.site_id)
+        except SolarEdgeNotFoundError:
+            return StorageState()
+        except (SolarEdgeAuthError, SolarEdgeRateLimitError):
+            raise
+        except SolarEdgeError as err:
+            LOGGER.debug(
+                "Storage telemetry fetch failed for site %s: %s", self.site_id, err
+            )
+            return StorageState()
+        return parse_storage_state(raw)
 
     # -- scheduling ---------------------------------------------------------
     def _apply_backoff(self, retry_after: float | None) -> None:

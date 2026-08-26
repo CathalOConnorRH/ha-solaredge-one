@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, patch
 from aiosolaredge_one import (
     ConsumptionOverview,
     Device,
+    EnvironmentalBenefits,
     ProductionOverview,
+    Site,
     SiteOverview,
     TimeSeries,
     TimeValue,
@@ -108,7 +110,15 @@ async def _setup(
         client.get_power = AsyncMock(return_value=_power())
         client.get_alerts = AsyncMock(return_value=[])
         client.get_devices = AsyncMock(return_value=devices or [])
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=SITE_ID, name="My Home")
+        )
+        client.get_lifetime_energy = AsyncMock(return_value=_empty_energy())
         client.get_energy = AsyncMock(return_value=_empty_energy())
+        client.get_environmental_benefits = AsyncMock(
+            return_value=EnvironmentalBenefits()
+        )
+        client.get_storage_telemetry = AsyncMock(return_value={})
         client.get_sites = AsyncMock(return_value=[])
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -170,7 +180,15 @@ async def test_power_unknown_when_series_all_null(hass: HomeAssistant) -> None:
         client.get_power = AsyncMock(return_value=empty_power)
         client.get_alerts = AsyncMock(return_value=[])
         client.get_devices = AsyncMock(return_value=[])
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=SITE_ID, name="My Home")
+        )
+        client.get_lifetime_energy = AsyncMock(return_value=_empty_energy())
         client.get_energy = AsyncMock(return_value=_empty_energy())
+        client.get_environmental_benefits = AsyncMock(
+            return_value=EnvironmentalBenefits()
+        )
+        client.get_storage_telemetry = AsyncMock(return_value={})
         client.get_sites = AsyncMock(return_value=[])
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -208,28 +226,35 @@ async def test_device_tree_registers_site_and_inverter(hass: HomeAssistant) -> N
 async def test_energy_total_sensors_from_energy_endpoint(hass: HomeAssistant) -> None:
     """Lifetime / this-year / this-month sensors come from /energy.
 
-    The YEAR call yields one bucket per year: their sum is lifetime and the
-    current year's bucket is year-to-date. The MONTH call yields month-to-date.
+    Lifetime is a single ``resolution=TOTAL`` bucket. The MONTH call spans the
+    current year: its sum is year-to-date and its current-month bucket is
+    month-to-date. Buckets are built relative to today so the test is
+    month-agnostic.
     """
-    # Current-year bucket is matched by the coordinator against datetime.now().
-    this_year = datetime.now(UTC).year
-    yearly = TimeSeries(
+    now = datetime.now(UTC)
+    total = TimeSeries(
         period_from=None,
         period_to=None,
         unit="WH",
-        resolution="YEAR",
-        values=[
-            TimeValue(timestamp=f"{this_year - 2}-01-01T00:00:00Z", value=9000000.0),
-            TimeValue(timestamp=f"{this_year - 1}-01-01T00:00:00Z", value=8000000.0),
-            TimeValue(timestamp=f"{this_year}-01-01T00:00:00Z", value=3534371.0),
-        ],
+        resolution="TOTAL",
+        values=[TimeValue(timestamp=f"{now.year}-01-01T00:00:00Z", value=20534371.0)],
     )
+    month_prefix = now.strftime("%Y-%m")
+    if now.month == 1:
+        month_values = [TimeValue(timestamp=f"{month_prefix}-01T00:00:00Z", value=527197.0)]
+        ytd_expected, mtd_expected = 527197.0, 527197.0
+    else:
+        month_values = [
+            TimeValue(timestamp=f"{now.year}-01-01T00:00:00Z", value=3000000.0),
+            TimeValue(timestamp=f"{month_prefix}-01T00:00:00Z", value=527197.0),
+        ]
+        ytd_expected, mtd_expected = 3527197.0, 527197.0
     monthly = TimeSeries(
         period_from=None,
         period_to=None,
         unit="WH",
         resolution="MONTH",
-        values=[TimeValue(timestamp=f"{this_year}-08-01T00:00:00Z", value=527197.0)],
+        values=month_values,
     )
 
     entry = _make_entry()
@@ -240,21 +265,122 @@ async def test_energy_total_sensors_from_energy_endpoint(hass: HomeAssistant) ->
         client.get_power = AsyncMock(return_value=_power())
         client.get_alerts = AsyncMock(return_value=[])
         client.get_devices = AsyncMock(return_value=[])
-        client.get_energy = AsyncMock(side_effect=[yearly, monthly])
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=SITE_ID, name="My Home")
+        )
+        client.get_lifetime_energy = AsyncMock(return_value=total)
+        client.get_energy = AsyncMock(return_value=monthly)
+        client.get_environmental_benefits = AsyncMock(
+            return_value=EnvironmentalBenefits()
+        )
+        client.get_storage_telemetry = AsyncMock(return_value={})
         client.get_sites = AsyncMock(return_value=[])
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
     lifetime = hass.states.get("sensor.my_home_lifetime_production")
     assert lifetime is not None
-    assert lifetime.state == "20534371.0"  # 9M + 8M + 3.534M
+    assert lifetime.state == "20534371.0"
     assert lifetime.attributes["state_class"] == "total_increasing"
     assert lifetime.attributes["device_class"] == "energy"
 
     year = hass.states.get("sensor.my_home_production_this_year")
     assert year is not None
-    assert year.state == "3534371.0"  # 2026 bucket
+    assert year.state == str(ytd_expected)
 
     month = hass.states.get("sensor.my_home_production_this_month")
     assert month is not None
-    assert month.state == "527197.0"
+    assert month.state == str(mtd_expected)
+
+
+async def test_environmental_sensors_created_when_reported(
+    hass: HomeAssistant,
+) -> None:
+    """CO2 saved + EV miles sensors appear when the site reports them."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    with patch("custom_components.solaredge_one.SolarEdgeOneClient") as mock_cls:
+        client = mock_cls.return_value
+        client.get_site_overview = AsyncMock(return_value=_pv_only_overview())
+        client.get_power = AsyncMock(return_value=_power())
+        client.get_alerts = AsyncMock(return_value=[])
+        client.get_devices = AsyncMock(return_value=[])
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=SITE_ID, name="My Home")
+        )
+        client.get_lifetime_energy = AsyncMock(return_value=_empty_energy())
+        client.get_energy = AsyncMock(return_value=_empty_energy())
+        client.get_environmental_benefits = AsyncMock(
+            return_value=EnvironmentalBenefits(co2_emissions=1234.5, ev_miles=678.0)
+        )
+        client.get_storage_telemetry = AsyncMock(return_value={})
+        client.get_sites = AsyncMock(return_value=[])
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    co2 = hass.states.get("sensor.my_home_co2_emissions_saved")
+    assert co2 is not None
+    assert co2.state == "1234.5"
+    assert co2.attributes["unit_of_measurement"] == "kg"
+
+    miles = hass.states.get("sensor.my_home_equivalent_ev_miles")
+    assert miles is not None
+    assert miles.state == "678.0"
+
+
+async def test_no_environmental_sensors_when_absent(hass: HomeAssistant) -> None:
+    """A site that reports no environmental benefits gets no such sensors."""
+    await _setup(hass, _pv_only_overview())
+    assert hass.states.get("sensor.my_home_co2_emissions_saved") is None
+    assert hass.states.get("sensor.my_home_equivalent_ev_miles") is None
+
+
+async def test_battery_sensors_created_when_battery_present(
+    hass: HomeAssistant,
+) -> None:
+    """Battery telemetry sensors appear for a site with a battery + telemetry."""
+    battery = Device(type="BATTERY", serial_number="BAT-1", name="Battery")
+    raw = {
+        "telemetries": [
+            {"timestamp": "2026-08-26T10:15:00Z", "stateOfEnergy": 62.0}
+        ],
+        "dischargePower": 900.0,
+        "batteryRemainingEnergy": 5100.0,
+    }
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    with patch("custom_components.solaredge_one.SolarEdgeOneClient") as mock_cls:
+        client = mock_cls.return_value
+        client.get_site_overview = AsyncMock(return_value=_pv_only_overview())
+        client.get_power = AsyncMock(return_value=_power())
+        client.get_alerts = AsyncMock(return_value=[])
+        client.get_devices = AsyncMock(return_value=[battery])
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=SITE_ID, name="My Home")
+        )
+        client.get_lifetime_energy = AsyncMock(return_value=_empty_energy())
+        client.get_energy = AsyncMock(return_value=_empty_energy())
+        client.get_environmental_benefits = AsyncMock(
+            return_value=EnvironmentalBenefits()
+        )
+        client.get_storage_telemetry = AsyncMock(return_value=raw)
+        client.get_sites = AsyncMock(return_value=[])
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    soc = hass.states.get("sensor.my_home_battery_charge")
+    assert soc is not None
+    assert soc.state == "62.0"
+    assert soc.attributes["device_class"] == "battery"
+    assert soc.attributes["unit_of_measurement"] == "%"
+
+    discharge = hass.states.get("sensor.my_home_battery_discharge_power")
+    assert discharge is not None
+    assert discharge.state == "900.0"
+
+    remaining = hass.states.get("sensor.my_home_battery_remaining_energy")
+    assert remaining is not None
+    assert remaining.state == "5100.0"
+
+    # Charge power wasn't in the payload → that sensor isn't created.
+    assert hass.states.get("sensor.my_home_battery_charge_power") is None

@@ -26,7 +26,12 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfPower
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfEnergy,
+    UnitOfPower,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -97,6 +102,58 @@ SENSORS: tuple[SolarEdgeOneSensorDescription, ...] = (
     _energy(
         "consumption_from_storage",
         lambda data: data.overview.consumption.from_storage,
+    ),
+    # Environmental benefits (lifetime, from /environmental-benefits). Diagnostic
+    # and only created when the site reports them.
+    SolarEdgeOneSensorDescription(
+        key="co2_saved",
+        translation_key="co2_saved",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement="kg",
+        value_fn=lambda data: data.environmental.co2_emissions,
+    ),
+    SolarEdgeOneSensorDescription(
+        key="ev_miles",
+        translation_key="ev_miles",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement="mi",
+        value_fn=lambda data: data.environmental.ev_miles,
+    ),
+    # Battery telemetry (from /storage/telemetry). Only created when a battery is
+    # present and the value could be parsed from the live payload.
+    SolarEdgeOneSensorDescription(
+        key="battery_state_of_charge",
+        translation_key="battery_state_of_charge",
+        device_class=SensorDeviceClass.BATTERY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        value_fn=lambda data: data.storage.state_of_charge,
+    ),
+    SolarEdgeOneSensorDescription(
+        key="battery_charge_power",
+        translation_key="battery_charge_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=lambda data: data.storage.charge_power,
+    ),
+    SolarEdgeOneSensorDescription(
+        key="battery_discharge_power",
+        translation_key="battery_discharge_power",
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfPower.WATT,
+        value_fn=lambda data: data.storage.discharge_power,
+    ),
+    SolarEdgeOneSensorDescription(
+        key="battery_remaining_energy",
+        translation_key="battery_remaining_energy",
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
+        value_fn=lambda data: data.storage.remaining_energy,
     ),
 )
 

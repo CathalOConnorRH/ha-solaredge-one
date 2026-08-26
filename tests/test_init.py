@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, patch
 
 from aiosolaredge_one import (
     ConsumptionOverview,
+    EnvironmentalBenefits,
     ProductionOverview,
+    Site,
     SiteOverview,
     TimeSeries,
 )
@@ -60,7 +62,14 @@ async def test_setup_and_unload(hass: HomeAssistant) -> None:
         client.get_power = AsyncMock(return_value=_power())
         client.get_alerts = AsyncMock(return_value=[])
         client.get_devices = AsyncMock(return_value=[])
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=3066774, name="My Home")
+        )
+        client.get_lifetime_energy = AsyncMock(return_value=_power())
         client.get_energy = AsyncMock(return_value=_power())
+        client.get_environmental_benefits = AsyncMock(
+            return_value=EnvironmentalBenefits()
+        )
         client.get_sites = AsyncMock(return_value=[])
 
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -84,6 +93,10 @@ async def test_setup_auth_failure_triggers_reauth(hass: HomeAssistant) -> None:
         client = mock_cls.return_value
         client.get_site_overview = AsyncMock(side_effect=SolarEdgeAuthError("bad"))
         client.get_power = AsyncMock(return_value=_power())
+        client.get_site_details = AsyncMock(
+            return_value=Site(site_id=3066774, name="My Home")
+        )
+        client.get_devices = AsyncMock(return_value=[])
 
         assert not await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

@@ -9,6 +9,8 @@ from aiosolaredge_one import (
     BudgetPlan,
     ConsumptionOverview,
     CreditLedger,
+    Device,
+    EnvironmentalBenefits,
     ProductionOverview,
     Site,
     SiteOverview,
@@ -68,11 +70,28 @@ def _power() -> TimeSeries:
     )
 
 
+def _empty_ts() -> TimeSeries:
+    return TimeSeries(period_from=None, period_to=None, unit="WH", resolution=None)
+
+
 def _coordinator(
-    hass: HomeAssistant, entry: MockConfigEntry, client: Mock, ledger: CreditLedger
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    client: Mock,
+    ledger: CreditLedger,
+    *,
+    install_date: str | None = None,
+    has_battery: bool = False,
 ) -> SolarEdgeOneCoordinator:
     return SolarEdgeOneCoordinator(
-        hass, entry, client, 3066774, ledger, ledger_store(hass, entry.entry_id)
+        hass,
+        entry,
+        client,
+        3066774,
+        ledger,
+        ledger_store(hass, entry.entry_id),
+        install_date=install_date,
+        has_battery=has_battery,
     )
 
 
@@ -96,7 +115,9 @@ async def test_successful_cycle_paces_and_persists(hass: HomeAssistant) -> None:
     client.get_site_overview = AsyncMock(return_value=_overview())
     client.get_power = AsyncMock(return_value=_power())
     client.get_alerts = AsyncMock(return_value=[])
-    client.get_energy = AsyncMock(return_value=_power())
+    client.get_lifetime_energy = AsyncMock(return_value=_empty_ts())
+    client.get_energy = AsyncMock(return_value=_empty_ts())
+    client.get_environmental_benefits = AsyncMock(return_value=EnvironmentalBenefits())
     client.get_sites = AsyncMock(return_value=[])
     ledger = CreditLedger(monthly_budget=2000)
 
@@ -110,37 +131,44 @@ async def test_successful_cycle_paces_and_persists(hass: HomeAssistant) -> None:
     assert await ledger_store(hass, entry.entry_id).async_load() is not None
 
 
+def _month_buckets(now: datetime) -> tuple[TimeSeries, float, float]:
+    """Build a Jan..current-month MONTH series + its (ytd sum, mtd) totals."""
+    values = [
+        TimeValue(
+            timestamp=f"{now.year}-{m:02d}-01T00:00:00Z", value=100000.0 * m
+        )
+        for m in range(1, now.month + 1)
+    ]
+    series = TimeSeries(
+        period_from=None, period_to=None, unit="WH", resolution="MONTH", values=values
+    )
+    ytd = sum(100000.0 * m for m in range(1, now.month + 1))
+    mtd = 100000.0 * now.month
+    return series, ytd, mtd
+
+
 async def test_energy_totals_use_install_date_and_populate(
     hass: HomeAssistant,
 ) -> None:
-    """A clean cycle looks up the install date and fills the energy totals."""
-    from datetime import datetime
-
+    """A clean cycle uses TOTAL for lifetime and MONTH for this-year/this-month."""
     entry = _entry()
     entry.add_to_hass(hass)
-    this_year = datetime.now(UTC).year
-    yearly = TimeSeries(
+    now = datetime.now(UTC)
+    total = TimeSeries(
         period_from=None,
         period_to=None,
         unit="WH",
-        resolution="YEAR",
-        values=[
-            TimeValue(timestamp=f"{this_year - 1}-01-01T00:00:00Z", value=8000000.0),
-            TimeValue(timestamp=f"{this_year}-01-01T00:00:00Z", value=3500000.0),
-        ],
+        resolution="TOTAL",
+        values=[TimeValue(timestamp=f"{now.year}-01-01T00:00:00Z", value=11500000.0)],
     )
-    monthly = TimeSeries(
-        period_from=None,
-        period_to=None,
-        unit="WH",
-        resolution="MONTH",
-        values=[TimeValue(timestamp=f"{this_year}-08-01T00:00:00Z", value=500000.0)],
-    )
+    monthly, ytd, mtd = _month_buckets(now)
     client = Mock()
     client.get_site_overview = AsyncMock(return_value=_overview())
     client.get_power = AsyncMock(return_value=_power())
     client.get_alerts = AsyncMock(return_value=[])
-    client.get_energy = AsyncMock(side_effect=[yearly, monthly])
+    client.get_lifetime_energy = AsyncMock(return_value=total)
+    client.get_energy = AsyncMock(return_value=monthly)
+    client.get_environmental_benefits = AsyncMock(return_value=EnvironmentalBenefits())
     client.get_sites = AsyncMock(
         return_value=[
             Site(site_id=3066774, name="My Home", installation_date="2019-06-01")
@@ -151,12 +179,55 @@ async def test_energy_totals_use_install_date_and_populate(
     await coord.async_refresh()
 
     assert coord.last_update_success is True
-    assert coord.data.energy.lifetime == 11500000.0  # 8M + 3.5M
-    assert coord.data.energy.year_to_date == 3500000.0
-    assert coord.data.energy.month_to_date == 500000.0
-    # The install date bounded the YEAR window (from=2019-06-01).
-    year_call = client.get_energy.await_args_list[0]
-    assert year_call.kwargs["date_from"].year == 2019
+    assert coord.data.energy.lifetime == 11500000.0
+    assert coord.data.energy.year_to_date == ytd
+    assert coord.data.energy.month_to_date == mtd
+    # Lifetime came from the TOTAL call (no YEAR fallback needed).
+    client.get_lifetime_energy.assert_awaited_once()
+    # The install date bounded the lifetime window (from=2019-06-01).
+    assert client.get_lifetime_energy.await_args.kwargs["date_from"].year == 2019
+    # Only the MONTH call goes through get_energy when TOTAL succeeds.
+    assert client.get_energy.await_count == 1
+    assert client.get_energy.await_args.kwargs["resolution"] == "MONTH"
+
+
+async def test_lifetime_falls_back_to_year_when_total_empty(
+    hass: HomeAssistant,
+) -> None:
+    """An empty TOTAL response falls back to summing a YEAR call for lifetime."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+    now = datetime.now(UTC)
+    yearly = TimeSeries(
+        period_from=None,
+        period_to=None,
+        unit="WH",
+        resolution="YEAR",
+        values=[
+            TimeValue(timestamp=f"{now.year - 1}-01-01T00:00:00Z", value=8000000.0),
+            TimeValue(timestamp=f"{now.year}-01-01T00:00:00Z", value=3500000.0),
+        ],
+    )
+    monthly, ytd, mtd = _month_buckets(now)
+    client = Mock()
+    client.get_site_overview = AsyncMock(return_value=_overview())
+    client.get_power = AsyncMock(return_value=_power())
+    client.get_alerts = AsyncMock(return_value=[])
+    client.get_lifetime_energy = AsyncMock(return_value=_empty_ts())
+    client.get_energy = AsyncMock(side_effect=[yearly, monthly])
+    client.get_environmental_benefits = AsyncMock(return_value=EnvironmentalBenefits())
+    client.get_sites = AsyncMock(return_value=[])
+
+    coord = _coordinator(hass, entry, client, CreditLedger(monthly_budget=2000))
+    await coord.async_refresh()
+
+    assert coord.last_update_success is True
+    assert coord.data.energy.lifetime == 11500000.0  # 8M + 3.5M from the YEAR call
+    assert coord.data.energy.year_to_date == ytd
+    assert coord.data.energy.month_to_date == mtd
+    # First get_energy call is the YEAR fallback, second is the MONTH call.
+    assert client.get_energy.await_args_list[0].kwargs["resolution"] == "YEAR"
+    assert client.get_energy.await_args_list[1].kwargs["resolution"] == "MONTH"
 
 
 async def test_energy_not_found_is_tolerated(hass: HomeAssistant) -> None:
@@ -167,7 +238,11 @@ async def test_energy_not_found_is_tolerated(hass: HomeAssistant) -> None:
     client.get_site_overview = AsyncMock(return_value=_overview())
     client.get_power = AsyncMock(return_value=_power())
     client.get_alerts = AsyncMock(return_value=[])
+    client.get_lifetime_energy = AsyncMock(
+        side_effect=SolarEdgeNotFoundError("no energy")
+    )
     client.get_energy = AsyncMock(side_effect=SolarEdgeNotFoundError("no energy"))
+    client.get_environmental_benefits = AsyncMock(return_value=EnvironmentalBenefits())
     client.get_sites = AsyncMock(return_value=[])
 
     coord = _coordinator(hass, entry, client, CreditLedger(monthly_budget=2000))
@@ -177,6 +252,107 @@ async def test_energy_not_found_is_tolerated(hass: HomeAssistant) -> None:
     assert coord.data.energy.lifetime is None
     assert coord.data.energy.year_to_date is None
     assert coord.data.energy.month_to_date is None
+
+
+async def test_environmental_benefits_populate(hass: HomeAssistant) -> None:
+    """A clean cycle fills the environmental-benefits snapshot."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+    client = Mock()
+    client.get_site_overview = AsyncMock(return_value=_overview())
+    client.get_power = AsyncMock(return_value=_power())
+    client.get_alerts = AsyncMock(return_value=[])
+    client.get_lifetime_energy = AsyncMock(return_value=_empty_ts())
+    client.get_energy = AsyncMock(return_value=_empty_ts())
+    client.get_environmental_benefits = AsyncMock(
+        return_value=EnvironmentalBenefits(co2_emissions=1234.5, ev_miles=678.0)
+    )
+    client.get_sites = AsyncMock(return_value=[])
+
+    coord = _coordinator(hass, entry, client, CreditLedger(monthly_budget=2000))
+    await coord.async_refresh()
+
+    assert coord.data.environmental.co2_emissions == 1234.5
+    assert coord.data.environmental.ev_miles == 678.0
+    assert client.get_environmental_benefits.await_args.kwargs["unit"] == "METRIC"
+
+
+async def test_storage_skipped_without_battery(hass: HomeAssistant) -> None:
+    """PV-only sites never call the storage endpoint and get an empty snapshot."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+    client = Mock()
+    client.get_site_overview = AsyncMock(return_value=_overview())
+    client.get_power = AsyncMock(return_value=_power())
+    client.get_alerts = AsyncMock(return_value=[])
+    client.get_lifetime_energy = AsyncMock(return_value=_empty_ts())
+    client.get_energy = AsyncMock(return_value=_empty_ts())
+    client.get_environmental_benefits = AsyncMock(return_value=EnvironmentalBenefits())
+    client.get_storage_telemetry = AsyncMock(return_value={})
+    client.get_sites = AsyncMock(return_value=[])
+
+    coord = _coordinator(hass, entry, client, CreditLedger(monthly_budget=2000))
+    await coord.async_refresh()
+
+    client.get_storage_telemetry.assert_not_called()
+    assert coord.data.storage.state_of_charge is None
+
+
+async def test_storage_telemetry_parsed_when_battery_present(
+    hass: HomeAssistant,
+) -> None:
+    """With a battery, the raw telemetry is fetched and parsed defensively."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+    raw = {
+        "telemetries": [
+            {"timestamp": "2026-08-26T10:00:00Z", "stateOfEnergy": 40.0},
+            {"timestamp": "2026-08-26T10:15:00Z", "stateOfEnergy": 55.5},
+        ],
+        "dischargePower": 1200.0,
+        "batteryRemainingEnergy": 4800.0,
+    }
+    client = Mock()
+    client.get_site_overview = AsyncMock(return_value=_overview())
+    client.get_power = AsyncMock(return_value=_power())
+    client.get_alerts = AsyncMock(return_value=[])
+    client.get_lifetime_energy = AsyncMock(return_value=_empty_ts())
+    client.get_energy = AsyncMock(return_value=_empty_ts())
+    client.get_environmental_benefits = AsyncMock(return_value=EnvironmentalBenefits())
+    client.get_storage_telemetry = AsyncMock(return_value=raw)
+    client.get_sites = AsyncMock(return_value=[])
+
+    coord = _coordinator(
+        hass, entry, client, CreditLedger(monthly_budget=2000), has_battery=True
+    )
+    await coord.async_refresh()
+
+    client.get_storage_telemetry.assert_awaited_once()
+    assert coord.data.storage.state_of_charge == 55.5  # latest point in the series
+    assert coord.data.storage.discharge_power == 1200.0
+    assert coord.data.storage.remaining_energy == 4800.0
+    assert coord.data.storage.charge_power is None  # not present in payload
+
+
+def test_has_battery_detection() -> None:
+    """_has_battery recognises battery/storage device types."""
+    from custom_components.solaredge_one import _has_battery
+
+    assert _has_battery([Device(type="BATTERY", serial_number="B1")]) is True
+    assert _has_battery([Device(type="STORAGE", serial_number="S1")]) is True
+    assert _has_battery([Device(type="INVERTER", serial_number="I1")]) is False
+    assert _has_battery([]) is False
+
+
+def test_parse_storage_state_handles_empty() -> None:
+    """An empty/unrecognised payload yields an all-None snapshot."""
+    from custom_components.solaredge_one.coordinator import parse_storage_state
+
+    state = parse_storage_state({})
+    assert state.state_of_charge is None
+    assert state.charge_power is None
+    assert state.discharge_power is None
+    assert state.remaining_energy is None
 
 
 async def test_rate_limit_backs_off_without_crashing(hass: HomeAssistant) -> None:
