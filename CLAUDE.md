@@ -63,7 +63,9 @@ stay green; HACS currently has `ignore: brands` until a brands-icon PR lands).
 
 ## Code map (`custom_components/solaredge_one/`)
 
-- `__init__.py` — setup/unload; builds the client, loads the persisted credit
+- `__init__.py` — setup/unload; builds the client (API key, or bearer token via
+  `OAuth2Session` when `auth_type == "oauth"`; entries without `auth_type` are
+  API-key entries), loads the persisted credit
   ledger, creates the coordinator, does a one-off `/devices` fetch and registers
   the device tree; typed `runtime_data` (`SolarEdgeOneRuntimeData`).
 - `coordinator.py` — `DataUpdateCoordinator`. Per cycle fetches overview + power
@@ -73,9 +75,20 @@ stay green; HACS currently has `ignore: brands` until a brands-icon PR lands).
   `/energy` fetch (`ENERGY_REFRESH_INTERVAL`, daytime-only, cached) for the slow
   lifetime / this-year / this-month totals. Data container: `SolarEdgeOneData`
   (+ `EnergyTotals`).
-- `config_flow.py` — plan-type step, `/sites` validation, Fleet site picker,
-  single-site auto-create, reauth; options flow for budget/calls-per-minute/
-  safety-factor with a reload listener.
+- `config_flow.py` — `AbstractOAuth2FlowHandler`. The `user` step is a menu:
+  **Site Access (OAuth)** → pick application credential → `sign_in` menu
+  (automatic via our callback view, or paste the redirect URL) → token exchange
+  → `site` step (site_id from the redirect, validated with `GET /sites/{id}`);
+  **API key** → plan-type form, `/sites` validation, Fleet site picker,
+  single-site auto-create. Reauth splits by `auth_type`. Options flow for
+  budget/calls-per-minute/safety-factor with a reload listener.
+- `oauth.py` / `application_credentials.py` — OAuth 2.0 Site Access. SolarEdge
+  Connect **never returns `state`**, so HA's generic callback and
+  my.home-assistant.io can't be used: we serve `/auth/solaredge_one/callback`
+  and correlate on the `external_id` we put in the authorize URL. The token
+  endpoint takes a **JSON body** (custom `_token_request`). `token_provider()`
+  adapts `OAuth2Session` to the client and maps refresh failures (4xx →
+  `SolarEdgeAuthError` → reauth; 429/5xx → transient).
 - `sensor.py` — description-driven site sensors. Energy sensors are
   `total_increasing` Wh (device_class energy → Energy Dashboard); current power is
   a `measurement` W from `power.latest_value`. Breakdown + slow-total sensors are
@@ -104,6 +117,9 @@ stay green; HACS currently has `ignore: brands` until a brands-icon PR lands).
   and **`get_sites`** (install-date lookup). Missing a mock → non-awaitable
   MagicMock → the refresh fails.
 - Keep `strings.json` and `translations/en.json` byte-identical.
+- OAuth tests (`tests/test_oauth.py`) register an application credential under
+  auth domain `"cred"`, so OAuth entries use `auth_implementation: "cred"`. Flow
+  tests that reach the OAuth path need the `current_request_with_host` fixture.
 
 ## Release process (this repo)
 
@@ -122,6 +138,11 @@ HACS installs from GitHub releases; hassfest/HACS validation run on push/PR.
   the 0.3.0 library endpoints: environmental benefits (CO2 saved + EV miles),
   site-details metadata (seeds install date + site hw_version), lifetime energy
   via `resolution=TOTAL` (YEAR fallback), and battery storage telemetry.
+- **v0.4.0 (unreleased)** adds OAuth 2.0 Site Access (GitHub issue #1), which
+  needs `aiosolaredge-one==0.4.0` (bearer `token_provider`). The flow details
+  (no `state`, `external_id` correlation, JSON token body, `expires_in` as a
+  string) come from other community integrations and are **not yet verified
+  against a live Site Access app**.
 - **Lifetime-via-TOTAL and storage telemetry are unverified against a live
   site:** both are guarded — TOTAL falls back to a YEAR-sum, and storage is
   battery-gated with defensive `parse_storage_state` that no-ops on an

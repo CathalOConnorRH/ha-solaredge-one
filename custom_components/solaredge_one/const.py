@@ -19,6 +19,20 @@ CONF_SITE_NAME = "site_name"
 CONF_MONTHLY_BUDGET = "monthly_credit_budget"
 CONF_CALLS_PER_MINUTE = "calls_per_minute"
 CONF_SAFETY_FACTOR = "budget_safety_factor"
+CONF_AUTH_TYPE = "auth_type"
+CONF_REDIRECT_URL = "redirect_url"
+
+# Auth types. Entries created before OAuth support have no CONF_AUTH_TYPE and
+# are treated as AUTH_API_KEY.
+AUTH_API_KEY = "api_key"
+AUTH_OAUTH = "oauth"
+
+# OAuth 2.0 Site Access (SolarEdge Connect). SolarEdge redirects back with
+# ``code``, ``site_id`` and our ``external_id`` but never echoes ``state``, so
+# HA's generic /auth/external/callback (and my.home-assistant.io) can't route
+# the redirect; we serve our own callback and correlate on ``external_id``.
+OAUTH_CALLBACK_PATH = "/auth/solaredge_one/callback"
+DEVELOPER_PORTAL_URL = "https://developer.solaredge.com"
 
 # Plan types (see prd/00-overview.md)
 PLAN_FLEET = "fleet"

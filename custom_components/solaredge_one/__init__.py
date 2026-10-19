@@ -13,12 +13,17 @@ from aiosolaredge_one import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
+    AUTH_API_KEY,
+    AUTH_OAUTH,
     CONF_ACCOUNT_KEY,
     CONF_API_KEY,
+    CONF_AUTH_TYPE,
     CONF_MONTHLY_BUDGET,
     CONF_SITE_ID,
     DEFAULT_MONTHLY_BUDGET,
@@ -27,6 +32,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import SolarEdgeOneCoordinator
+from .oauth import token_provider
 from .store import ledger_store, load_ledger
 
 
@@ -48,8 +54,6 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: SolarEdgeOneConfigEntry
 ) -> bool:
     """Set up SolarEdge ONE from a config entry."""
-    session = async_get_clientsession(hass)
-
     # Budget can be edited in options; options win over the original config data.
     monthly_budget = int(
         entry.options.get(
@@ -60,12 +64,7 @@ async def async_setup_entry(
     store = ledger_store(hass, entry.entry_id)
     ledger = await load_ledger(store, monthly_budget)
 
-    client = SolarEdgeOneClient(
-        session,
-        api_key=entry.data[CONF_API_KEY],
-        account_key=entry.data.get(CONF_ACCOUNT_KEY),
-        ledger=ledger,
-    )
+    client = await _async_build_client(hass, entry, ledger)
     site_id = int(entry.data[CONF_SITE_ID])
 
     # One-off metadata fetched before the coordinator so it can seed the install
@@ -108,6 +107,35 @@ async def async_setup_entry(
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+async def _async_build_client(
+    hass: HomeAssistant, entry: SolarEdgeOneConfigEntry, ledger: CreditLedger
+) -> SolarEdgeOneClient:
+    """Create the API client for the entry's auth type (OAuth or API key)."""
+    session = async_get_clientsession(hass)
+    if entry.data.get(CONF_AUTH_TYPE, AUTH_API_KEY) != AUTH_OAUTH:
+        return SolarEdgeOneClient(
+            session,
+            api_key=entry.data[CONF_API_KEY],
+            account_key=entry.data.get(CONF_ACCOUNT_KEY),
+            ledger=ledger,
+        )
+    try:
+        implementation = (
+            await config_entry_oauth2_flow.async_get_config_entry_implementation(
+                hass, entry
+            )
+        )
+    except ValueError as err:
+        # The application credential was removed (or not loaded yet).
+        raise ConfigEntryNotReady(
+            "SolarEdge application credentials are not available"
+        ) from err
+    oauth_session = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
+    return SolarEdgeOneClient(
+        session, token_provider=token_provider(oauth_session), ledger=ledger
+    )
 
 
 async def async_unload_entry(
