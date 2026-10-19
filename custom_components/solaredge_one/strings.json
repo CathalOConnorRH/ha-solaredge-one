@@ -3,22 +3,22 @@
     "step": {
       "user": {
         "title": "Connect to SolarEdge ONE",
-        "description": "How do you want to connect?",
+        "description": "Choose the access type of your SolarEdge Developer Platform app.\n\n- **Site Access**: homeowners. You sign in with your mySolarEdge homeowner account and approve access (OAuth 2.0). Installer accounts can't use this.\n- **Fleet Access**: installers and fleet owners. You paste the app's API key; all sites the key can read are offered.",
         "menu_options": {
-          "oauth": "Site Access: sign in with SolarEdge (homeowners, OAuth 2.0)",
-          "api_key": "API key (Fleet Access or an existing key)"
+          "oauth": "Site Access (homeowners): sign in with SolarEdge",
+          "api_key": "Fleet Access (installers): enter an API key"
         }
       },
       "api_key": {
-        "title": "Connect with an API key",
-        "description": "Enter your SolarEdge ONE API credentials. The API key is required; the account key is only needed for Fleet accounts.",
+        "title": "Fleet Access: enter an API key",
+        "description": "Enter your Fleet Access app's API key from the SolarEdge Developer Platform. The account key is only needed if your app provides one.",
         "data": {
           "plan_type": "Plan type",
           "api_key": "API key (X-API-Key)",
           "account_key": "Account key (X-Account-Key, optional)"
         },
         "data_description": {
-          "plan_type": "Choose 'Fleet' for a My Fleet token or 'Site owner' for a single-site token."
+          "plan_type": "Choose 'Fleet' for a Fleet Access app key. 'Site owner' is for older single-site keys."
         }
       },
       "pick_implementation": {

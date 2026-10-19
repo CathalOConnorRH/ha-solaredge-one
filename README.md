@@ -64,6 +64,9 @@ When you add the integration, choose how to connect:
 
 ### Site Access: sign in with SolarEdge (homeowners)
 
+> **Installers:** Site Access refuses installer accounts, even when you also own
+> the site. Use [Fleet Access](#fleet-access-installers) instead.
+
 Homeowners on the
 [SolarEdge Developer Platform](https://developer.solaredge.com) get a
 **Client ID and Client Secret** instead of an API key. The site owner then
@@ -81,6 +84,8 @@ approves access through SolarEdge's consent screen (OAuth 2.0).
    has to work from your browser, not from the internet. SolarEdge always
    redirects to the registered URI, whatever address you started the setup
    from.
+   Set the app's **Origin URL** to the same HTTPS address without the path
+   (e.g. `https://ha.example.com`) and leave **Returned URL** blank.
 3. In Home Assistant, add the integration and choose **Site Access**. When
    asked, enter the Client ID and Client Secret. They are stored as
    **Application credentials** and can be managed under *Settings → Devices &
@@ -96,7 +101,11 @@ numeric site ID. Access grants last up to 24 months, and refresh tokens expire
 after about 30 days without use. When either runs out, Home Assistant asks you
 to **re-authorize** and you approve access again.
 
-### API key (Fleet Access)
+### Fleet Access (installers)
+
+On the developer platform, create a **Fleet Access** app (Monitoring service)
+and copy its **App API key**. In Home Assistant choose **Fleet Access** and
+paste the key. Every site the key can read is listed; add one per entry.
 
 | Field | Notes |
 |-------|-------|
