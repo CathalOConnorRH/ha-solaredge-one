@@ -9,8 +9,9 @@ integration.
   and backs off on rate limits, so it never blows through your quota.
 - **Energy Dashboard first-class** — cumulative production/import/export/storage
   energy sensors with the correct device/state classes.
-- **Fleet _and_ Site Owner** tokens, chosen in the config flow. One config entry
-  per site; multi-site Fleet accounts add each site separately.
+- **Site Access (OAuth 2.0) _and_ API keys**: homeowners sign in with SolarEdge
+  and approve access; Fleet accounts use an API key. One config entry per site;
+  multi-site Fleet accounts add each site separately.
 - **Alerts, diagnostics, and per-inverter inventory** surfaced as entities.
 
 > **Read-only.** This integration does not control or write to your system
@@ -59,13 +60,57 @@ into your config. Pick whichever route suits you.
 
 ## Configuration
 
-You'll need a SolarEdge ONE API key from the
-[developer platform](https://api-docs.solaredge.com/docs/developer-platform/xfdh5szlltdtn-welcome-to-solar-edge-one-for-developers).
+When you add the integration, choose how to connect:
+
+### Site Access: sign in with SolarEdge (homeowners)
+
+> **Installers:** Site Access refuses installer accounts, even when you also own
+> the site. Use [Fleet Access](#fleet-access-installers) instead.
+
+Homeowners on the
+[SolarEdge Developer Platform](https://developer.solaredge.com) get a
+**Client ID and Client Secret** instead of an API key. The site owner then
+approves access through SolarEdge's consent screen (OAuth 2.0).
+
+1. On the developer platform, create an app: **Application type: Site Access**,
+   **Service: Monitoring**, **Authentication: OAuth 2.0**, with the
+   `SITE_DATA` and `DEVICE_DATA` scopes.
+2. Set its **redirect URI** to your Home Assistant address followed by
+   `/auth/solaredge_one/callback`, for example
+   `https://ha.example.com/auth/solaredge_one/callback`. SolarEdge only accepts
+   **HTTPS on a real domain** (or `http://localhost`), so a plain
+   `http://192.168.x.x:8123` address is rejected. Use the HTTPS name you reach
+   Home Assistant at, such as a reverse proxy or Home Assistant Cloud. It only
+   has to work from your browser, not from the internet. SolarEdge always
+   redirects to the registered URI, whatever address you started the setup
+   from.
+   Set the app's **Origin URL** to the same HTTPS address without the path
+   (e.g. `https://ha.example.com`) and leave **Returned URL** blank.
+3. In Home Assistant, add the integration and choose **Site Access**. When
+   asked, enter the Client ID and Client Secret. They are stored as
+   **Application credentials** and can be managed under *Settings → Devices &
+   services → ⋮ → Application credentials*.
+4. Choose **Sign in automatically**, approve access in the SolarEdge tab, and
+   the setup finishes on its own. If the redirect can't reach Home Assistant,
+   choose **Paste the redirect address**, approve access, then copy the address
+   SolarEdge sent the tab to (it contains `code=`). Paste it straight away:
+   codes are single-use and short-lived.
+
+SolarEdge sends back the site you approved. If it doesn't, you're asked for the
+numeric site ID. Access grants last up to 24 months, and refresh tokens expire
+after about 30 days without use. When either runs out, Home Assistant asks you
+to **re-authorize** and you approve access again.
+
+### Fleet Access (installers)
+
+On the developer platform, create a **Fleet Access** app (Monitoring service)
+and copy its **App API key**. In Home Assistant choose **Fleet Access** and
+paste the key. Every site the key can read is listed; add one per entry.
 
 | Field | Notes |
 |-------|-------|
-| **Plan type** | *Fleet (My Fleet)* or *Site owner* |
-| **API key** (`X-API-Key`) | Required for both plan types |
+| **Plan type** | *Fleet (My Fleet)* or *Site owner* (legacy single-site key) |
+| **API key** (`X-API-Key`) | Required |
 | **Account key** (`X-Account-Key`) | Fleet accounts only |
 
 For a Fleet token you then pick which site to add; run the flow again to add
@@ -199,6 +244,12 @@ automation:
 
 - **"Invalid authentication"** — check the API key (and, for Fleet tokens, the
   account key). Use the integration's **reauth** prompt to enter a new key.
+- **Site Access: "SolarEdge refused the authorization code"** — codes are
+  single-use and expire within minutes. Sign in again and paste the new address
+  immediately. Also check that the app's redirect URI matches the one shown in
+  the setup dialog exactly, including `http`/`https` and the port.
+- **Site Access: the SolarEdge tab lands on an error page** — the redirect URI
+  isn't reachable from your browser. Use **Paste the redirect address** instead.
 - **A "credit budget may be exceeded" repair issue** — polling has been slowed
   automatically; raise the **Monthly credit budget** in the options if your plan
   actually allows more, or lower the **safety factor** for more headroom.

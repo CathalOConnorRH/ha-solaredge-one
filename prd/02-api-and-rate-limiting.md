@@ -11,8 +11,16 @@
 - **Auth:** header-based (NOT bearer):
   - `X-Account-Key` — identifies the SolarEdge **account** (fleet level)
   - `X-API-Key` — identifies the specific SolarEdge **user**
-  - Some endpoints accept either method; some require the API Key. OAuth
-    ("SolarEdge Connect") was announced as a future auth method.
+  - Some endpoints accept either method; some require the API Key.
+  - **OAuth 2.0 Site Access ("SolarEdge Connect")**, supported since v0.4.0:
+    authorize at `https://connect.solaredge.com/authorize` (`client_id`,
+    `scope=SITE_DATA DEVICE_DATA`, `access_duration` up to 24 months,
+    `external_id`, `redirect_uri`). The redirect returns `code`, `site_id` and
+    `external_id`, but **no `state`**. The token endpoint is
+    `POST https://monitoringapi.solaredge.com/v2/oauth2/token` with a JSON body,
+    and API calls send `Authorization: Bearer <token>`. Refresh tokens lapse
+    after about 30 days unused. These details come from other community
+    integrations and still need checking against a live Site Access app.
   - **Plan-type mapping (to verify in Phase 0):** Fleet ("My Fleet") likely
     supplies both keys and can list many sites; Site Owner likely uses the
     API Key path and is single-site. Confirm exactly which header(s) each plan

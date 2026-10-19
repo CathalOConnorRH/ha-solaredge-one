@@ -20,9 +20,10 @@ jobs:
           python-version: "3.13"
       - name: Install deps
         # The client library lives in its own repo (CathalOConnorRH/solaredge-v2)
-        # and is published to PyPI. Pin matches manifest.json requirements.
+        # and is published to PyPI. Install exactly what manifest.json requires,
+        # so the CI pin can never drift from the one HA/HACS install at runtime.
         run: |
-          pip install "aiosolaredge-one==0.3.0"
+          pip install $(python -c "import json; print(' '.join(json.load(open('custom_components/solaredge_one/manifest.json'))['requirements']))")
           pip install pytest-homeassistant-custom-component ruff mypy
       - name: Ruff
         run: ruff check custom_components/solaredge_one tests

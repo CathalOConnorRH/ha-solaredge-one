@@ -10,7 +10,15 @@ from homeassistant.core import HomeAssistant
 from . import SolarEdgeOneConfigEntry
 from .const import CONF_ACCOUNT_KEY, CONF_API_KEY
 
-TO_REDACT = {CONF_API_KEY, CONF_ACCOUNT_KEY, "serialNumber", "serial_number"}
+TO_REDACT = {
+    CONF_API_KEY,
+    CONF_ACCOUNT_KEY,
+    "token",
+    "access_token",
+    "refresh_token",
+    "serialNumber",
+    "serial_number",
+}
 
 
 async def async_get_config_entry_diagnostics(

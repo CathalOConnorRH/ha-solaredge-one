@@ -3,10 +3,11 @@
   "name": "SolarEdge ONE",
   "codeowners": ["@CathalOConnorRH"],
   "config_flow": true,
+  "dependencies": ["application_credentials", "http"],
   "documentation": "https://github.com/CathalOConnorRH/ha-solaredge-one",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/CathalOConnorRH/ha-solaredge-one/issues",
-  "requirements": ["aiosolaredge-one==0.3.0"],
-  "version": "0.3.0"
+  "requirements": ["aiosolaredge-one==0.4.0"],
+  "version": "0.4.0"
 }

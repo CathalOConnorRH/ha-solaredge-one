@@ -34,6 +34,18 @@ def _site(site_id: int, name: str = "My Home", status: str = "ACTIVE") -> Site:
     return Site(site_id=site_id, name=name, activation_status=status)
 
 
+async def _start_api_key_flow(hass: HomeAssistant) -> dict:
+    """Open the flow and choose the API-key path from the auth menu."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "user"
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "api_key"}
+    )
+
+
 def _patch_client(sites=None, side_effect=None):
     """Patch the client used inside the config flow."""
     patcher = patch("custom_components.solaredge_one.config_flow.SolarEdgeOneClient")
@@ -47,11 +59,9 @@ async def test_user_flow_single_site(hass: HomeAssistant) -> None:
     """A token with one site creates an entry directly (no site picker)."""
     patcher, _ = _patch_client(sites=[_site(3066774, "My Home")])
     try:
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+        result = await _start_api_key_flow(hass)
         assert result["type"] is FlowResultType.FORM
-        assert result["step_id"] == "user"
+        assert result["step_id"] == "api_key"
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -70,9 +80,7 @@ async def test_user_flow_multi_site(hass: HomeAssistant) -> None:
     """A fleet token with several sites shows the site picker."""
     patcher, _ = _patch_client(sites=[_site(1, "Alpha"), _site(2, "Beta")])
     try:
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+        result = await _start_api_key_flow(hass)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {CONF_PLAN_TYPE: PLAN_FLEET, CONF_API_KEY: "test-key"},
@@ -106,9 +114,7 @@ async def test_user_flow_errors(
     """Auth/connection failures surface as form errors, not crashes."""
     patcher, _ = _patch_client(side_effect=side_effect)
     try:
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+        result = await _start_api_key_flow(hass)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {CONF_PLAN_TYPE: PLAN_SITE_OWNER, CONF_API_KEY: "bad-key"},
@@ -125,9 +131,7 @@ async def test_user_flow_no_new_sites(hass: HomeAssistant) -> None:
     MockConfigEntry(domain=DOMAIN, unique_id="1", data={}).add_to_hass(hass)
     patcher, _ = _patch_client(sites=[_site(1, "Alpha")])
     try:
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+        result = await _start_api_key_flow(hass)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {CONF_PLAN_TYPE: PLAN_FLEET, CONF_API_KEY: "test-key"},
@@ -143,9 +147,7 @@ async def test_user_flow_with_account_key(hass: HomeAssistant) -> None:
     """A Fleet token with an account key is stored alongside the api key."""
     patcher, _ = _patch_client(sites=[_site(3066774, "My Home")])
     try:
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+        result = await _start_api_key_flow(hass)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {
@@ -284,9 +286,7 @@ async def test_duplicate_site_aborts(hass: HomeAssistant) -> None:
     # Only one site and it's already configured -> filtered out -> no_sites.
     patcher, _ = _patch_client(sites=[_site(3066774, "My Home")])
     try:
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
+        result = await _start_api_key_flow(hass)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {CONF_PLAN_TYPE: PLAN_SITE_OWNER, CONF_API_KEY: "test-key"},

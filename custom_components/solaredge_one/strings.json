@@ -3,14 +3,47 @@
     "step": {
       "user": {
         "title": "Connect to SolarEdge ONE",
-        "description": "Enter your SolarEdge ONE API credentials. The API key is required; the account key is only needed for Fleet accounts.",
+        "description": "Choose the access type of your SolarEdge Developer Platform app.\n\n- **Site Access**: homeowners. You sign in with your mySolarEdge homeowner account and approve access (OAuth 2.0). Installer accounts can't use this.\n- **Fleet Access**: installers and fleet owners. You paste the app's API key; all sites the key can read are offered.",
+        "menu_options": {
+          "oauth": "Site Access (homeowners): sign in with SolarEdge",
+          "api_key": "Fleet Access (installers): enter an API key"
+        }
+      },
+      "api_key": {
+        "title": "Fleet Access: enter an API key",
+        "description": "Enter your Fleet Access app's API key from the SolarEdge Developer Platform. The account key is only needed if your app provides one.",
         "data": {
           "plan_type": "Plan type",
           "api_key": "API key (X-API-Key)",
           "account_key": "Account key (X-Account-Key, optional)"
         },
         "data_description": {
-          "plan_type": "Choose 'Fleet' for a My Fleet token or 'Site owner' for a single-site token."
+          "plan_type": "Choose 'Fleet' for a Fleet Access app key. 'Site owner' is for older single-site keys."
+        }
+      },
+      "pick_implementation": {
+        "title": "Pick the SolarEdge application credentials"
+      },
+      "sign_in": {
+        "title": "Sign in with SolarEdge",
+        "description": "Register this redirect URI on your SolarEdge Site Access app:\n\n`{callback_url}`\n\nSolarEdge only accepts **HTTPS** addresses on a real domain. If the one above is `http://` or an IP address, register the HTTPS address you reach Home Assistant at instead (for example via a reverse proxy or Home Assistant Cloud), followed by `/auth/solaredge_one/callback`. It only has to work from your browser.\n\nChoose **Sign in automatically** to open SolarEdge and approve access. If the redirect can't reach Home Assistant, choose **Paste the redirect address**.",
+        "menu_options": {
+          "authorize": "Sign in automatically",
+          "paste": "Paste the redirect address"
+        }
+      },
+      "paste": {
+        "title": "Paste the redirect address",
+        "description": "1. Open [the SolarEdge consent page]({authorize_url}) and approve access.\n2. When SolarEdge sends the tab to your redirect URI (even if the page doesn't load), copy the full address from the address bar. It contains `code=`.\n3. Paste it below. The code is single-use and expires quickly.",
+        "data": {
+          "redirect_url": "Redirect address"
+        }
+      },
+      "site": {
+        "title": "Select the site",
+        "description": "Enter the numeric ID of the site you approved on the SolarEdge consent screen.",
+        "data": {
+          "site_id": "Site ID"
         }
       },
       "select_site": {
@@ -27,18 +60,37 @@
           "api_key": "API key (X-API-Key)",
           "account_key": "Account key (X-Account-Key, optional)"
         }
+      },
+      "reauth_oauth": {
+        "title": "Re-authorize SolarEdge ONE",
+        "description": "SolarEdge access for this site has expired or been revoked. Submit to sign in with SolarEdge and approve access again."
       }
     },
     "error": {
       "invalid_auth": "Invalid authentication. Check your API key.",
       "cannot_connect": "Failed to connect to SolarEdge. Try again.",
-      "unknown": "Unexpected error."
+      "unknown": "Unexpected error.",
+      "oauth_failed": "SolarEdge refused the authorization code. Sign in again and paste the new redirect address straight away (codes are single-use and expire quickly).",
+      "invalid_redirect_url": "That address doesn't contain an authorization code (`code=`).",
+      "site_not_found": "SolarEdge has no site with that ID.",
+      "site_not_authorized": "This sign-in wasn't granted access to that site. Use the site ID you approved."
     },
     "abort": {
       "already_configured": "This site is already configured.",
       "no_sites": "No new sites are available for this account.",
-      "reauth_successful": "Re-authentication was successful."
+      "reauth_successful": "Re-authentication was successful.",
+      "wrong_site": "You authorized a different site than the one this entry is for.",
+      "migrated_to_oauth": "This site was already set up with an API key. It now uses Site Access instead, and its entities and history are kept.",
+      "missing_configuration": "No SolarEdge application credentials are configured. Add your Site Access Client ID and Client Secret under Settings > Devices & services > Application credentials.",
+      "missing_credentials": "No SolarEdge application credentials are configured. Add your Site Access Client ID and Client Secret first.",
+      "oauth_implementation_unavailable": "The SolarEdge application credentials are unavailable.",
+      "user_rejected_authorize": "Access was declined on SolarEdge: {error}",
+      "authorize_url_timeout": "Timed out generating the SolarEdge sign-in address.",
+      "no_url_available": "No Home Assistant URL is available. Configure one: {docs_url}"
     }
+  },
+  "application_credentials": {
+    "description": "Create a **Site Access** app with the Monitoring service on the [SolarEdge Developer Platform]({developer_portal_url}) and register this redirect URI:\n\n`{redirect_url}`\n\nSolarEdge only accepts HTTPS addresses on a real domain. If the one above is `http://` or an IP address, use the HTTPS address you reach Home Assistant at instead, followed by `/auth/solaredge_one/callback`.\n\nThen enter the app's Client ID and Client Secret here."
   },
   "options": {
     "step": {
