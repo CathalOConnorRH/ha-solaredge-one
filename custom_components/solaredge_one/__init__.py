@@ -180,7 +180,7 @@ def _register_devices(
     hw_version = (
         f"{site.peak_power:g} kWp" if site and site.peak_power is not None else None
     )
-    registry.async_get_or_create(
+    site_device = registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, str(site_id))},
         manufacturer="SolarEdge",
@@ -195,7 +195,7 @@ def _register_devices(
         if not serial or serial in seen:
             continue
         seen.add(serial)
-        registry.async_get_or_create(
+        child = registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(DOMAIN, serial)},
             manufacturer=device.manufacturer or "SolarEdge",
@@ -203,5 +203,9 @@ def _register_devices(
             name=device.name or device.type,
             sw_version=device.firmware_version or device.firmware,
             serial_number=serial,
-            via_device=(DOMAIN, str(site_id)),
         )
+        # Link to the site device by id: newer HA deprecates the identifier-
+        # based ``via_device`` argument, and ``async_get_or_create`` doesn't
+        # take ``via_device_id`` on every supported version.
+        if child.via_device_id != site_device.id:
+            registry.async_update_device(child.id, via_device_id=site_device.id)
