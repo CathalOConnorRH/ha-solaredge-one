@@ -45,12 +45,19 @@ class SolarEdgeOneOAuth2Implementation(AuthImplementation):
         """Our own callback view, not HA's generic one."""
         return callback_url(self.hass)
 
-    async def async_generate_authorize_url(self, flow_id: str) -> str:
-        """Build the consent URL and remember which flow it belongs to."""
+    async def async_generate_authorize_url(
+        self, flow_id: str, redirect_uri: str | None = None
+    ) -> str:
+        """Build the consent URL and remember which flow it belongs to.
+
+        ``redirect_uri`` must match the one registered on the SolarEdge app
+        exactly, or SolarEdge rejects the sign-in ("We couldn't verify your
+        account"); the config flow passes the value the user confirmed.
+        """
         async_register_view(self.hass)
         external_id = secrets.token_urlsafe(16)
         pending_flows(self.hass)[external_id] = flow_id
-        return str(
+        url = str(
             URL(self.authorize_url).with_query(
                 {
                     "client_id": self.client_id,
@@ -58,10 +65,12 @@ class SolarEdgeOneOAuth2Implementation(AuthImplementation):
                     # Ask for the longest grant the site owner may approve.
                     "access_duration": str(OAUTH2_MAX_ACCESS_DURATION),
                     "external_id": external_id,
-                    "redirect_uri": self.redirect_uri,
+                    "redirect_uri": redirect_uri or self.redirect_uri,
                 }
             )
         )
+        LOGGER.debug("SolarEdge authorize URL: %s", url)
+        return url
 
     async def async_resolve_external_data(self, external_data: Any) -> dict[str, Any]:
         """Exchange the (single-use) authorization code for tokens."""
@@ -116,6 +125,20 @@ async def async_get_description_placeholders(hass: HomeAssistant) -> dict[str, s
         "developer_portal_url": DEVELOPER_PORTAL_URL,
         "redirect_url": redirect_url,
     }
+
+
+def is_valid_redirect_uri(url: str) -> bool:
+    """True for an address SolarEdge accepts as a redirect URI.
+
+    HTTPS on a named host, or plain HTTP on ``localhost``.
+    """
+    try:
+        parsed = URL(url.strip())
+    except ValueError:
+        return False
+    if parsed.scheme == "http" and parsed.host == "localhost":
+        return True
+    return _is_https_domain(str(parsed))
 
 
 def _is_https_domain(url: str) -> bool:

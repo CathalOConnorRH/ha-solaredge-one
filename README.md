@@ -90,7 +90,11 @@ approves access through SolarEdge's consent screen (OAuth 2.0).
    asked, enter the Client ID and Client Secret. They are stored as
    **Application credentials** and can be managed under *Settings → Devices &
    services → ⋮ → Application credentials*.
-4. Choose **Sign in automatically**, approve access in the SolarEdge tab, and
+4. Confirm the **registered redirect URI**. Copy it from your app on the
+   developer platform: it must match **exactly**, or SolarEdge shows *"We
+   couldn't verify your account"*. Home Assistant suggests one based on the
+   address you're browsing from, which is wrong if you're on a local IP.
+5. Choose **Sign in automatically**, approve access in the SolarEdge tab, and
    the setup finishes on its own. If the redirect can't reach Home Assistant,
    choose **Paste the redirect address**, approve access, then copy the address
    SolarEdge sent the tab to (it contains `code=`). Paste it straight away:
@@ -248,8 +252,17 @@ automation:
   single-use and expire within minutes. Sign in again and paste the new address
   immediately. Also check that the app's redirect URI matches the one shown in
   the setup dialog exactly, including `http`/`https` and the port.
+- **Site Access: SolarEdge says "We couldn't verify your account"** — the
+  redirect URI entered in the sign-in step doesn't match the one registered on
+  your app exactly (check `https`, the domain, the port and any trailing
+  slash), or you signed in with an installer account instead of your
+  mySolarEdge homeowner account.
 - **Site Access: the SolarEdge tab lands on an error page** — the redirect URI
   isn't reachable from your browser. Use **Paste the redirect address** instead.
+- **Setup dialog shows blank rows (just a `>`) or old text after an update** —
+  Home Assistant is still using the previous version's text. Restart Home
+  Assistant after every HACS update, then hard-refresh the browser
+  (Ctrl+Shift+R / Cmd+Shift+R) or clear the app cache on mobile.
 - **A "credit budget may be exceeded" repair issue** — polling has been slowed
   automatically; raise the **Monthly credit budget** in the options if your plan
   actually allows more, or lower the **safety factor** for more headroom.

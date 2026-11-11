@@ -40,6 +40,10 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
+from .application_credentials import (
+    SolarEdgeOneOAuth2Implementation,
+    is_valid_redirect_uri,
+)
 from .const import (
     AUTH_API_KEY,
     AUTH_OAUTH,
@@ -49,8 +53,10 @@ from .const import (
     CONF_CALLS_PER_MINUTE,
     CONF_MONTHLY_BUDGET,
     CONF_PLAN_TYPE,
+    CONF_REDIRECT_URI,
     CONF_REDIRECT_URL,
     CONF_SAFETY_FACTOR,
+    CONF_SIGN_IN_METHOD,
     CONF_SITE_ID,
     CONF_SITE_NAME,
     DEFAULT_CALLS_PER_MINUTE,
@@ -61,6 +67,8 @@ from .const import (
     PLAN_FLEET,
     PLAN_SITE_OWNER,
     PLANS,
+    SIGN_IN_AUTOMATIC,
+    SIGN_IN_METHODS,
 )
 from .oauth import async_forget_flow, callback_url, parse_redirect_url
 
@@ -104,6 +112,21 @@ SITE_SCHEMA = vol.Schema(
     }
 )
 
+SIGN_IN_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_REDIRECT_URI): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.URL)
+        ),
+        vol.Required(CONF_SIGN_IN_METHOD, default=SIGN_IN_AUTOMATIC): SelectSelector(
+            SelectSelectorConfig(
+                options=SIGN_IN_METHODS,
+                mode=SelectSelectorMode.LIST,
+                translation_key=CONF_SIGN_IN_METHOD,
+            )
+        ),
+    }
+)
+
 PASTE_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_REDIRECT_URL): TextSelector(
@@ -130,6 +153,7 @@ class SolarEdgeOneConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
         self._oauth_data: dict[str, Any] = {}
         self._authorize_url: str | None = None
         self._oauth_error: str | None = None
+        self._redirect_uri: str | None = None
 
     @property
     def logger(self) -> logging.Logger:
@@ -229,12 +253,51 @@ class SolarEdgeOneConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     async def async_step_sign_in(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show the redirect URI, then sign in automatically or by pasting."""
-        return self.async_show_menu(
+        """Confirm the app's registered redirect URI, then choose how to sign in.
+
+        SolarEdge rejects the consent request unless ``redirect_uri`` matches
+        the app's registered URI exactly, and the address the browser is using
+        (often a local IP) usually isn't it, so the user confirms the value.
+        """
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            redirect_uri = str(user_input[CONF_REDIRECT_URI]).strip()
+            if is_valid_redirect_uri(redirect_uri):
+                if redirect_uri != self._redirect_uri:
+                    # A new URI needs a new consent URL.
+                    self._authorize_url = None
+                self._redirect_uri = redirect_uri
+                if user_input[CONF_SIGN_IN_METHOD] == SIGN_IN_AUTOMATIC:
+                    return await self.async_step_authorize()
+                return await self.async_step_paste()
+            errors[CONF_REDIRECT_URI] = "invalid_redirect_uri"
+        suggested = (
+            user_input
+            if user_input is not None
+            else {
+                CONF_REDIRECT_URI: self._suggested_redirect_uri(),
+                CONF_SIGN_IN_METHOD: SIGN_IN_AUTOMATIC,
+            }
+        )
+        return self.async_show_form(
             step_id="sign_in",
-            menu_options=["authorize", "paste"],
+            data_schema=self.add_suggested_values_to_schema(SIGN_IN_SCHEMA, suggested),
+            errors=errors,
             description_placeholders={"callback_url": callback_url(self.hass)},
         )
+
+    def _suggested_redirect_uri(self) -> str:
+        """Prefer a URI already used for this integration over a guess."""
+        if self._redirect_uri:
+            return self._redirect_uri
+        if self.source == SOURCE_REAUTH and (
+            uri := self._get_reauth_entry().data.get(CONF_REDIRECT_URI)
+        ):
+            return str(uri)
+        for entry in self._async_current_entries():
+            if uri := entry.data.get(CONF_REDIRECT_URI):
+                return str(uri)
+        return callback_url(self.hass)
 
     async def async_step_authorize(
         self, user_input: dict[str, Any] | None = None
@@ -290,9 +353,13 @@ class SolarEdgeOneConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
             self._oauth_error = "oauth_failed"
             return await self.async_step_paste()
         token["expires_at"] = time.time() + token["expires_in"]
-        return await self.async_oauth_create_entry(
-            {"auth_implementation": self.flow_impl.domain, "token": token}
-        )
+        data: dict[str, Any] = {
+            "auth_implementation": self.flow_impl.domain,
+            "token": token,
+        }
+        if self._redirect_uri:
+            data[CONF_REDIRECT_URI] = self._redirect_uri
+        return await self.async_oauth_create_entry(data)
 
     async def async_oauth_create_entry(self, data: dict[str, Any]) -> ConfigFlowResult:
         """Finish reauth here; a new setup continues to the site step."""
@@ -356,7 +423,11 @@ class SolarEdgeOneConfigFlow(AbstractOAuth2FlowHandler, domain=DOMAIN):
     async def _async_authorize_url(self) -> str:
         # Generated once per flow: each call registers a new external_id.
         if self._authorize_url is None:
-            self._authorize_url = await self.async_generate_authorize_url()
+            impl = self.flow_impl
+            assert isinstance(impl, SolarEdgeOneOAuth2Implementation)
+            self._authorize_url = await impl.async_generate_authorize_url(
+                self.flow_id, redirect_uri=self._redirect_uri
+            )
         return self._authorize_url
 
     def _oauth_client(self) -> SolarEdgeOneClient:
