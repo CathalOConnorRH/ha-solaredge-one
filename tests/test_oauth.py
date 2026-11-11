@@ -37,7 +37,9 @@ from custom_components.solaredge_one.const import (
     AUTH_OAUTH,
     CONF_AUTH_TYPE,
     CONF_PLAN_TYPE,
+    CONF_REDIRECT_URI,
     CONF_REDIRECT_URL,
+    CONF_SIGN_IN_METHOD,
     CONF_SITE_ID,
     DOMAIN,
     OAUTH_CALLBACK_PATH,
@@ -87,10 +89,15 @@ async def _start_sign_in(hass: HomeAssistant) -> dict[str, Any]:
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "oauth"}
     )
-    assert result["type"] is FlowResultType.MENU
+    assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "sign_in"
     assert result["description_placeholders"]["callback_url"] == CALLBACK
     return result
+
+
+def _sign_in(method: str, redirect_uri: str = CALLBACK) -> dict[str, str]:
+    """User input for the sign_in step."""
+    return {CONF_REDIRECT_URI: redirect_uri, CONF_SIGN_IN_METHOD: method}
 
 
 @pytest.mark.usefixtures("current_request_with_host")
@@ -103,7 +110,7 @@ async def test_oauth_automatic_sign_in(
     """Consent → our callback → token exchange → entry, site taken from redirect."""
     result = await _start_sign_in(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "authorize"}
+        result["flow_id"], _sign_in("authorize")
     )
     assert result["type"] is FlowResultType.EXTERNAL_STEP
     url = URL(result["url"])
@@ -148,6 +155,78 @@ async def test_oauth_automatic_sign_in(
     assert "token_provider" in mock_site_client.call_args.kwargs
 
 
+REGISTERED = f"https://ha.example.org{OAUTH_CALLBACK_PATH}"
+
+
+@pytest.mark.usefixtures("current_request_with_host")
+async def test_oauth_uses_registered_redirect_uri(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    mock_site_client,
+) -> None:
+    """The confirmed redirect URI, not the browser's address, goes to SolarEdge."""
+    result = await _start_sign_in(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], _sign_in("paste", f" {REGISTERED} ")
+    )
+    assert result["step_id"] == "paste"
+    authorize = URL(result["description_placeholders"]["authorize_url"])
+    assert authorize.query["redirect_uri"] == REGISTERED
+
+    aioclient_mock.post(OAUTH2_TOKEN_URL, json=TOKEN)
+    with patch("custom_components.solaredge_one.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_REDIRECT_URL: f"{REGISTERED}?code=abc&site_id={SITE_ID}"},
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_REDIRECT_URI] == REGISTERED
+
+    # The next setup suggests the URI that worked.
+    result = await _start_sign_in(hass)
+    suggested = {
+        str(key): key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if key.description
+    }
+    assert suggested[CONF_REDIRECT_URI] == REGISTERED
+
+
+@pytest.mark.usefixtures("current_request_with_host")
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "http://192.168.1.10:8123/auth/solaredge_one/callback",
+        "https://192.168.1.10/auth/solaredge_one/callback",
+        "http://ha.example.org/auth/solaredge_one/callback",
+        "not a url",
+    ],
+)
+async def test_oauth_rejects_unusable_redirect_uri(
+    hass: HomeAssistant, redirect_uri: str
+) -> None:
+    """Addresses SolarEdge won't accept are caught before the consent page."""
+    result = await _start_sign_in(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], _sign_in("authorize", redirect_uri)
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "sign_in"
+    assert result["errors"] == {CONF_REDIRECT_URI: "invalid_redirect_uri"}
+
+
+@pytest.mark.usefixtures("current_request_with_host")
+async def test_oauth_accepts_localhost_redirect_uri(hass: HomeAssistant) -> None:
+    """``http://localhost`` is the one plain-HTTP address SolarEdge allows."""
+    local = f"http://localhost:8123{OAUTH_CALLBACK_PATH}"
+    result = await _start_sign_in(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], _sign_in("authorize", local)
+    )
+    assert result["type"] is FlowResultType.EXTERNAL_STEP
+    assert URL(result["url"]).query["redirect_uri"] == local
+
+
 @pytest.mark.usefixtures("current_request_with_host")
 async def test_oauth_paste_then_site_step(
     hass: HomeAssistant, aioclient_mock: AiohttpClientMocker, mock_site_client
@@ -156,7 +235,7 @@ async def test_oauth_paste_then_site_step(
     aioclient_mock.post(OAUTH2_TOKEN_URL, json=TOKEN)
     result = await _start_sign_in(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "paste"}
+        result["flow_id"], _sign_in("paste")
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "paste"
@@ -201,7 +280,7 @@ async def test_oauth_migrates_existing_api_key_entry(
 
     result = await _start_sign_in(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "paste"}
+        result["flow_id"], _sign_in("paste")
     )
     with patch("custom_components.solaredge_one.async_setup_entry", return_value=True):
         result = await hass.config_entries.flow.async_configure(
@@ -228,7 +307,7 @@ async def test_oauth_duplicate_oauth_site_aborts(
     aioclient_mock.post(OAUTH2_TOKEN_URL, json=TOKEN)
     result = await _start_sign_in(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "paste"}
+        result["flow_id"], _sign_in("paste")
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
@@ -259,7 +338,7 @@ async def test_oauth_site_step_errors(
     aioclient_mock.post(OAUTH2_TOKEN_URL, json=TOKEN)
     result = await _start_sign_in(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "paste"}
+        result["flow_id"], _sign_in("paste")
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
@@ -277,7 +356,7 @@ async def test_oauth_token_exchange_failure_falls_back_to_paste(
     aioclient_mock.post(OAUTH2_TOKEN_URL, status=HTTPStatus.BAD_REQUEST)
     result = await _start_sign_in(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "paste"}
+        result["flow_id"], _sign_in("paste")
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_REDIRECT_URL: f"{CALLBACK}?code=used"}
@@ -294,7 +373,7 @@ async def test_oauth_access_declined(
     """The site owner declining consent aborts the flow."""
     result = await _start_sign_in(hass)
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "authorize"}
+        result["flow_id"], _sign_in("authorize")
     )
     external_id = URL(result["url"]).query["external_id"]
     client = await hass_client_no_auth()
@@ -316,7 +395,7 @@ async def test_callback_rejects_unknown_external_id(
     """A redirect that matches no pending sign-in is refused."""
     result = await _start_sign_in(hass)
     await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "authorize"}
+        result["flow_id"], _sign_in("authorize")
     )
     client = await hass_client_no_auth()
     resp = await client.get(
@@ -352,6 +431,7 @@ def _oauth_entry(token: dict[str, Any] | None = None) -> MockConfigEntry:
             CONF_AUTH_TYPE: AUTH_OAUTH,
             CONF_PLAN_TYPE: PLAN_SITE_OWNER,
             CONF_SITE_ID: SITE_ID,
+            CONF_REDIRECT_URI: REGISTERED,
             "auth_implementation": "cred",
             "token": token
             or {
@@ -385,8 +465,14 @@ async def test_oauth_reauth(
     assert result["step_id"] == "reauth_oauth"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["step_id"] == "sign_in"
+    suggested = {
+        str(key): key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if key.description
+    }
+    assert suggested[CONF_REDIRECT_URI] == REGISTERED
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"next_step_id": "paste"}
+        result["flow_id"], _sign_in("paste")
     )
     with patch("custom_components.solaredge_one.async_setup_entry", return_value=True):
         result = await hass.config_entries.flow.async_configure(

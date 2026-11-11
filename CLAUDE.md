@@ -76,8 +76,10 @@ stay green; HACS currently has `ignore: brands` until a brands-icon PR lands).
   lifetime / this-year / this-month totals. Data container: `SolarEdgeOneData`
   (+ `EnergyTotals`).
 - `config_flow.py` — `AbstractOAuth2FlowHandler`. The `user` step is a menu:
-  **Site Access (OAuth)** → pick application credential → `sign_in` menu
-  (automatic via our callback view, or paste the redirect URL) → token exchange
+  **Site Access (OAuth)** → pick application credential → `sign_in` form
+  (confirm the app's *registered* redirect URI, which goes into the authorize URL
+  and is stored in entry data; then automatic via our callback view, or paste
+  the redirect URL) → token exchange
   → `site` step (site_id from the redirect, validated with `GET /sites/{id}`);
   **API key** → plan-type form, `/sites` validation, Fleet site picker,
   single-site auto-create. Reauth splits by `auth_type`. Options flow for
