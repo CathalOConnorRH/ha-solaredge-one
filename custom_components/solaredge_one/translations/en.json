@@ -26,10 +26,14 @@
       },
       "sign_in": {
         "title": "Sign in with SolarEdge",
-        "description": "Register this redirect URI on your SolarEdge Site Access app:\n\n`{callback_url}`\n\nSolarEdge only accepts **HTTPS** addresses on a real domain. If the one above is `http://` or an IP address, register the HTTPS address you reach Home Assistant at instead (for example via a reverse proxy or Home Assistant Cloud), followed by `/auth/solaredge_one/callback`. It only has to work from your browser.\n\nChoose **Sign in automatically** to open SolarEdge and approve access. If the redirect can't reach Home Assistant, choose **Paste the redirect address**.",
-        "menu_options": {
-          "authorize": "Sign in automatically",
-          "paste": "Paste the redirect address"
+        "description": "Enter the **redirect URI registered on your SolarEdge Site Access app**, exactly as it appears there. SolarEdge rejects the sign-in (\"We couldn't verify your account\") if it differs in any way, including `http`/`https`, the port or a trailing slash.\n\nSolarEdge only accepts **HTTPS** addresses on a real domain. Register the HTTPS address you reach Home Assistant at (for example via a reverse proxy or Home Assistant Cloud), followed by `/auth/solaredge_one/callback`. For this browser that is probably:\n\n`{callback_url}`\n\nIt only has to work from your browser. Choose **Sign in automatically** to open SolarEdge and approve access. If the redirect can't reach Home Assistant, choose **Paste the redirect address**.",
+        "data": {
+          "redirect_uri": "Registered redirect URI",
+          "sign_in_method": "Sign-in method"
+        },
+        "data_description": {
+          "redirect_uri": "Copy it from your app on the SolarEdge Developer Platform.",
+          "sign_in_method": "Pasting works even when the SolarEdge tab can't reach Home Assistant."
         }
       },
       "paste": {
@@ -71,6 +75,7 @@
       "cannot_connect": "Failed to connect to SolarEdge. Try again.",
       "unknown": "Unexpected error.",
       "oauth_failed": "SolarEdge refused the authorization code. Sign in again and paste the new redirect address straight away (codes are single-use and expire quickly).",
+      "invalid_redirect_uri": "Use an HTTPS address on a domain name (not an IP address), or http://localhost.",
       "invalid_redirect_url": "That address doesn't contain an authorization code (`code=`).",
       "site_not_found": "SolarEdge has no site with that ID.",
       "site_not_authorized": "This sign-in wasn't granted access to that site. Use the site ID you approved."
@@ -144,6 +149,12 @@
       "options": {
         "fleet": "Fleet (My Fleet)",
         "site_owner": "Site owner"
+      }
+    },
+    "sign_in_method": {
+      "options": {
+        "authorize": "Sign in automatically",
+        "paste": "Paste the redirect address"
       }
     }
   },

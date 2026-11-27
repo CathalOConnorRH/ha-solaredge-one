@@ -46,5 +46,7 @@ class SolarEdgeOneDeviceEntity(CoordinatorEntity[SolarEdgeOneCoordinator]):
             name=device.name or device.type,
             sw_version=device.firmware_version or device.firmware,
             serial_number=serial,
-            via_device=(DOMAIN, str(coordinator.site_id)),
+            # No ``via_device`` here: newer HA rejects the identifier-based
+            # form when the entity platform registers the device. Setup links
+            # child devices to the site with ``via_device_id`` instead.
         )

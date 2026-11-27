@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiosolaredge_one import (
     ConsumptionOverview,
@@ -15,6 +15,7 @@ from aiosolaredge_one import (
 )
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.solaredge_one.const import (
@@ -24,6 +25,7 @@ from custom_components.solaredge_one.const import (
     DOMAIN,
     PLAN_SITE_OWNER,
 )
+from custom_components.solaredge_one.entity import SolarEdgeOneDeviceEntity
 
 SITE_ID = 3066774
 
@@ -134,3 +136,23 @@ async def test_inverter_connectivity_and_optimizers(hass: HomeAssistant) -> None
     optimizers = hass.states.get("sensor.inverter_1_connected_optimizers")
     assert optimizers is not None
     assert optimizers.state == "14"
+
+    # The inverter hangs off the site device (linked by via_device_id, since
+    # the identifier-based via_device is rejected by newer HA).
+    registry = dr.async_get(hass)
+    site = registry.async_get_device(identifiers={(DOMAIN, str(SITE_ID))})
+    child = registry.async_get_device(identifiers={(DOMAIN, "INV-123")})
+    assert site is not None and child is not None
+    assert child.via_device_id == site.id
+
+
+def test_child_device_info_has_no_via_device() -> None:
+    """HA 2026.x rejects identifier-based via_device from entity platforms.
+
+    The test harness's HA doesn't raise yet, so guard the DeviceInfo directly.
+    """
+    coordinator = MagicMock(site_id=SITE_ID)
+    device = Device(type="INVERTER", serial_number="INV-123", name="Inverter 1")
+    entity = SolarEdgeOneDeviceEntity(coordinator, device, key="inverter_online")
+    assert entity.device_info is not None
+    assert "via_device" not in entity.device_info

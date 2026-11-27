@@ -21,6 +21,11 @@ CONF_CALLS_PER_MINUTE = "calls_per_minute"
 CONF_SAFETY_FACTOR = "budget_safety_factor"
 CONF_AUTH_TYPE = "auth_type"
 CONF_REDIRECT_URL = "redirect_url"
+CONF_REDIRECT_URI = "redirect_uri"
+CONF_SIGN_IN_METHOD = "sign_in_method"
+SIGN_IN_AUTOMATIC = "authorize"
+SIGN_IN_PASTE = "paste"
+SIGN_IN_METHODS = [SIGN_IN_AUTOMATIC, SIGN_IN_PASTE]
 
 # Auth types. Entries created before OAuth support have no CONF_AUTH_TYPE and
 # are treated as AUTH_API_KEY.
